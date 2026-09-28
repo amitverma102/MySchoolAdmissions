@@ -90,7 +90,12 @@ jobs:
             name="${item%%:*}"
             file="${item##*:}"
             echo "Building $name..."
-            docker build -t ${{ env.ACR_NAME }}.azurecr.io/$name:${{ github.sha }} -t ${{ env.ACR_NAME }}.azurecr.io/$name:latest -f $file .
+            context="."
+            if [[ "$name" == "web-portal" ]]; then
+              context="src/Web/my-school-admissions-web"
+              file="$context/Dockerfile"
+            fi
+            docker build -t ${{ env.ACR_NAME }}.azurecr.io/$name:${{ github.sha }} -t ${{ env.ACR_NAME }}.azurecr.io/$name:latest -f "$file" "$context"
             docker push ${{ env.ACR_NAME }}.azurecr.io/$name:${{ github.sha }}
             docker push ${{ env.ACR_NAME }}.azurecr.io/$name:latest
           done
