@@ -4,6 +4,10 @@ using MySchoolAdmissions.CommunicationService.Models;
 using MySchoolAdmissions.CommunicationService.Services;
 using Microsoft.AspNetCore.Mvc;
 
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
+
 namespace MySchoolAdmissions.CommunicationService.Controllers;
 
 [ApiController]
@@ -12,11 +16,19 @@ public class CommunicationsController : ControllerBase
 {
     private readonly ICommunicationStore _store;
     private readonly ILogger<CommunicationsController> _logger;
+    private readonly IConfiguration _configuration;
+    private readonly IHttpClientFactory _httpClientFactory;
 
-    public CommunicationsController(ICommunicationStore store, ILogger<CommunicationsController> logger)
+    public CommunicationsController(
+        ICommunicationStore store,
+        ILogger<CommunicationsController> logger,
+        IConfiguration configuration,
+        IHttpClientFactory httpClientFactory)
     {
         _store = store;
         _logger = logger;
+        _configuration = configuration;
+        _httpClientFactory = httpClientFactory;
     }
 
     [HttpGet("templates")]
@@ -73,23 +85,28 @@ public class CommunicationsController : ControllerBase
     }
 
     [HttpPost("send")]
-    public IActionResult SendMessage([FromBody] SendCommunicationDto dto)
+    public async Task<IActionResult> SendMessage([FromBody] SendCommunicationDto dto)
     {
         if (string.IsNullOrWhiteSpace(dto.Recipient))
         {
             return BadRequest(new { message = "Recipient (Phone/Email) is required." });
         }
 
-        string deepLink = string.Empty;
+        var status = "Logged";
+        string? providerMessageId = null;
+        string? sendError = null;
         if (dto.Channel.Equals("WhatsApp", StringComparison.OrdinalIgnoreCase))
         {
-            // Clean phone digits
-            var digitsOnly = new string(dto.Recipient.Where(char.IsDigit).ToArray());
-            if (digitsOnly.Length == 10)
+            var phone = NormalizeWhatsAppPhone(dto.Recipient);
+            if (phone.Length is < 10 or > 15)
             {
-                digitsOnly = "91" + digitsOnly; // default country code for 10-digit
+                return BadRequest(new { message = "Enter a valid WhatsApp number with its country code." });
             }
-            deepLink = $"https://wa.me/{digitsOnly}?text={Uri.EscapeDataString(dto.Content)}";
+
+            var sendResult = await SendWhatsAppCloudMessageAsync(phone, dto.Content);
+            status = sendResult.Success ? "Submitted" : "Failed";
+            providerMessageId = sendResult.MessageId;
+            sendError = sendResult.Error;
         }
 
         var log = new CommunicationLog
@@ -101,30 +118,45 @@ public class CommunicationsController : ControllerBase
             TemplateName = dto.TemplateName,
             Subject = dto.Subject,
             Content = dto.Content,
-            Status = "Delivered",
-            WhatsAppDeepLink = deepLink,
+            Status = status,
+            ProviderMessageId = providerMessageId,
+            WhatsAppDeepLink = string.Empty,
             SentAt = DateTime.UtcNow,
             HandledBy = dto.HandledBy
         };
 
         _store.Add(log);
 
-        _logger.LogInformation("[CommunicationService] Dispatched {Channel} to {Recipient} for {StudentName}. Content: {Content}",
-            dto.Channel, dto.Recipient, dto.StudentName, dto.Content);
+        _logger.LogInformation("[CommunicationService] {Channel} message status {Status} for {Recipient} ({StudentName}); provider message ID: {ProviderMessageId}",
+            dto.Channel, status, dto.Recipient, dto.StudentName, providerMessageId);
+
+        if (status == "Failed")
+        {
+            _logger.LogWarning("WhatsApp send failed for {Recipient}: {Error}", dto.Recipient, sendError);
+            return StatusCode(StatusCodes.Status502BadGateway, new
+            {
+                success = false,
+                logId = log.Id,
+                status,
+                message = "WhatsApp could not accept the message.",
+                details = sendError
+            });
+        }
 
         return Ok(new SendCommunicationResultDto
         {
             Success = true,
             LogId = log.Id,
-            Status = "Delivered",
+            Status = status,
             Channel = dto.Channel,
-            WhatsAppUrl = deepLink,
-            Message = $"{dto.Channel} message registered and dispatched."
+            Message = status == "Submitted"
+                ? "WhatsApp accepted the message. Final delivery confirmation is not currently tracked."
+                : $"{dto.Channel} message logged."
         });
     }
 
     [HttpPost("whatsapp/brochure")]
-    public IActionResult SendAdmissionBrochure([FromBody] SendWhatsAppBrochureDto dto)
+    public async Task<IActionResult> SendAdmissionBrochure([FromBody] SendWhatsAppBrochureDto dto)
     {
         if (string.IsNullOrWhiteSpace(dto.Phone))
         {
@@ -137,6 +169,11 @@ public class CommunicationsController : ControllerBase
             digitsOnly = "91" + digitsOnly;
         }
 
+        if (digitsOnly.Length is < 10 or > 15)
+        {
+            return BadRequest(new { message = "Enter a valid WhatsApp number with its country code." });
+        }
+
         var messageText = $"Hello {dto.StudentName}! 🎓 Greetings from *{dto.SchoolName}*.\n\n" +
                           $"We have received your admission inquiry for *{dto.TargetGrade}* (Academic Session 2026–2027).\n\n" +
                           $"📥 *Download Official Admissions Prospectus & Fee Structure:*\n{dto.BrochureUrl}\n\n" +
@@ -144,7 +181,7 @@ public class CommunicationsController : ControllerBase
                           $"Please reply to this message or call our admissions helpline to reserve your preferred date.\n\n" +
                           $"Warm regards,\n*{dto.CounselorName}*\n{dto.SchoolName} Admissions Team";
 
-        var deepLink = $"https://wa.me/{digitsOnly}?text={Uri.EscapeDataString(messageText)}";
+        var sendResult = await SendWhatsAppCloudMessageAsync(digitsOnly, messageText);
 
         var log = new CommunicationLog
         {
@@ -155,29 +192,122 @@ public class CommunicationsController : ControllerBase
             TemplateName = "Admission Brochure & Fee Structure 2026-27",
             Subject = $"Admissions Prospectus - {dto.SchoolName}",
             Content = messageText,
-            Status = "Delivered",
-            WhatsAppDeepLink = deepLink,
+            Status = sendResult.Success ? "Submitted" : "Failed",
+            ProviderMessageId = sendResult.MessageId,
+            WhatsAppDeepLink = string.Empty,
             SentAt = DateTime.UtcNow,
             HandledBy = dto.CounselorName
         };
 
         _store.Add(log);
 
-        _logger.LogInformation("[WhatsApp Cloud API] Admission brochure successfully dispatched to {Phone} for {StudentName}",
-            dto.Phone, dto.StudentName);
+        if (!sendResult.Success)
+        {
+            _logger.LogWarning("WhatsApp brochure send failed for {Phone}: {Error}", dto.Phone, sendResult.Error);
+            return StatusCode(StatusCodes.Status502BadGateway, new
+            {
+                success = false,
+                logId = log.Id,
+                status = "Failed",
+                message = "WhatsApp could not accept the brochure message.",
+                details = sendResult.Error
+            });
+        }
+
+        _logger.LogInformation("[WhatsApp Cloud API] Brochure message accepted for {Phone} ({StudentName}); provider message ID: {ProviderMessageId}",
+            dto.Phone, dto.StudentName, sendResult.MessageId);
 
         return Ok(new
         {
             success = true,
-            status = "Delivered",
-            channel = "WhatsApp Cloud API",
+            status = "Submitted",
+            channel = "WhatsApp",
             phone = dto.Phone,
             studentName = dto.StudentName,
             brochureUrl = dto.BrochureUrl,
-            whatsAppDeepLink = deepLink,
+            providerMessageId = sendResult.MessageId,
             timestamp = DateTime.UtcNow,
-            message = "Admission brochure dispatched via WhatsApp Cloud API successfully."
+            message = "WhatsApp accepted the brochure message. Final delivery confirmation is not currently tracked."
         });
+    }
+
+    private async Task<(bool Success, string? MessageId, string? Error)> SendWhatsAppCloudMessageAsync(string phone, string message)
+    {
+        var accessToken = _configuration["Meta:WhatsApp:AccessToken"];
+        var phoneNumberId = _configuration["Meta:WhatsApp:PhoneNumberId"];
+        if (string.IsNullOrWhiteSpace(accessToken) || string.IsNullOrWhiteSpace(phoneNumberId))
+        {
+            return (false, null, "WhatsApp Cloud API credentials are not configured.");
+        }
+
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return (false, null, "Message content is required.");
+        }
+
+        var apiVersion = _configuration["Meta:WhatsApp:ApiVersion"] ?? "v23.0";
+        if (!apiVersion.StartsWith('v')) apiVersion = $"v{apiVersion}";
+        var endpoint = $"https://graph.facebook.com/{apiVersion}/{Uri.EscapeDataString(phoneNumberId)}/messages";
+        var payload = new
+        {
+            messaging_product = "whatsapp",
+            recipient_type = "individual",
+            to = phone,
+            type = "text",
+            text = new { preview_url = true, body = message }
+        };
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+
+            using var response = await _httpClientFactory.CreateClient().SendAsync(request);
+            var responseBody = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                return (false, null, ExtractProviderError(responseBody) ?? $"WhatsApp returned HTTP {(int)response.StatusCode}.");
+            }
+
+            using var json = JsonDocument.Parse(responseBody);
+            var messageId = json.RootElement.TryGetProperty("messages", out var messages) && messages.GetArrayLength() > 0
+                ? messages[0].GetProperty("id").GetString()
+                : null;
+            return (true, messageId, null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "WhatsApp Cloud API request failed for {Phone}", phone);
+            return (false, null, "Could not reach the WhatsApp Cloud API.");
+        }
+    }
+
+    private static string NormalizeWhatsAppPhone(string phone)
+    {
+        var digits = new string(phone.Where(char.IsDigit).ToArray());
+        if (digits.Length == 10) return $"91{digits}";
+        if (digits.Length == 11 && digits[0] == '0') return $"91{digits[1..]}";
+        return digits;
+    }
+
+    private static string? ExtractProviderError(string responseBody)
+    {
+        try
+        {
+            using var json = JsonDocument.Parse(responseBody);
+            if (json.RootElement.TryGetProperty("error", out var error) &&
+                error.TryGetProperty("message", out var message))
+            {
+                return message.GetString();
+            }
+        }
+        catch (JsonException)
+        {
+            // Return a safe generic failure for non-JSON provider responses.
+        }
+
+        return null;
     }
 
     [HttpPost("telephony/call-log")]
@@ -211,4 +341,3 @@ public class CommunicationsController : ControllerBase
         });
     }
 }
-

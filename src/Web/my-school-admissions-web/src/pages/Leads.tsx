@@ -409,10 +409,11 @@ export default function Leads() {
   const fetchTemplates = async () => {
     try {
       const response = await api.get<CommunicationTemplate[]>('/api/communications/templates');
-      setTemplates(response.data);
-      if (response.data.length > 0) {
-        setSelectedTemplateId(response.data[0].id);
-        setCustomMessage(response.data[0].content);
+      const whatsappTemplates = response.data.filter(template => template.channel.toLowerCase() === 'whatsapp');
+      setTemplates(whatsappTemplates);
+      if (whatsappTemplates.length > 0) {
+        setSelectedTemplateId(whatsappTemplates[0].id);
+        setCustomMessage(whatsappTemplates[0].content);
       }
     } catch (error) {
       console.error('Error fetching communication templates:', error);
@@ -628,15 +629,13 @@ export default function Leads() {
         handledBy: 'Admissions Counselor'
       });
 
-      // Open WhatsApp Web in new tab with the pre-filled text
-      if (response.data.whatsAppUrl) {
-        window.open(response.data.whatsAppUrl, '_blank');
-      }
-
+      alert(response.data.message || 'WhatsApp accepted the message for submission.');
       setIsWhatsAppModalOpen(false);
       fetchCommHistory(selectedLead.id);
     } catch (error) {
       console.error('Error sending WhatsApp message:', error);
+      const apiMessage = (error as any)?.response?.data?.details || (error as any)?.response?.data?.message;
+      alert(apiMessage || 'WhatsApp could not accept the message. Check the number and WhatsApp API configuration.');
     } finally {
       setSendingMessage(false);
     }
@@ -657,18 +656,15 @@ export default function Leads() {
         targetGrade: lead.gradeInterested || 'Grade 1'
       });
 
-      if (res.data.whatsAppDeepLink) {
-        window.open(res.data.whatsAppDeepLink, '_blank');
-      }
-
-      setBrochureSuccessMsg(`Brochure sent to ${lead.phone} via WhatsApp Cloud API!`);
+      setBrochureSuccessMsg(res.data.message || `WhatsApp accepted the brochure message for ${lead.phone}.`);
       setTimeout(() => setBrochureSuccessMsg(''), 4000);
       if (lead.id && selectedLead?.id === lead.id) {
         fetchCommHistory(lead.id);
       }
     } catch (err) {
       console.error('Failed to send brochure', err);
-      alert('Error dispatching WhatsApp brochure.');
+      const apiMessage = (err as any)?.response?.data?.details || (err as any)?.response?.data?.message;
+      alert(apiMessage || 'WhatsApp could not accept the brochure message. Check the number and WhatsApp API configuration.');
     } finally {
       setBrochureSending(false);
     }
@@ -1873,7 +1869,7 @@ export default function Leads() {
 
               <div className="space-y-4 text-xs">
                 <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">Select Admission Template</label>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">Select WhatsApp Message Draft</label>
                   <select
                     value={selectedTemplateId}
                     onChange={(e) => {
@@ -1902,6 +1898,10 @@ export default function Leads() {
                   />
                 </div>
 
+                <p className="text-xs text-amber-700">
+                  WhatsApp may reject free-form messages if the recipient has not messaged your business in the last 24 hours. The API error will be shown if that happens.
+                </p>
+
                 <div className="flex gap-2 justify-end pt-2">
                   <button
                     type="button"
@@ -1916,7 +1916,7 @@ export default function Leads() {
                     onClick={handleSendWhatsApp}
                     className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs transition"
                   >
-                    {sendingMessage ? 'Dispatching...' : 'Launch WhatsApp Web & Log'}
+                    {sendingMessage ? 'Sending...' : 'Send WhatsApp Message'}
                   </button>
                 </div>
               </div>

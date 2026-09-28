@@ -1,7 +1,4 @@
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Text;
-using System.Text.Json;
 
 namespace MySchoolAdmissions.LeadService.Services;
 
@@ -34,50 +31,11 @@ public class WhatsAppService : IWhatsAppService
         }
 
         var cleanPhone = CleanPhoneNumber(toPhone);
-        var deepLink = $"https://wa.me/{cleanPhone}?text={Uri.EscapeDataString(message)}";
         var client = _httpClientFactory.CreateClient();
 
         bool sentSuccessfully = false;
 
-        // 1. Dispatch to Meta WhatsApp Cloud API if credentials exist
-        var metaToken = _configuration["Meta:WhatsApp:AccessToken"];
-        var metaPhoneId = _configuration["Meta:WhatsApp:PhoneNumberId"];
-        if (!string.IsNullOrWhiteSpace(metaToken) && !string.IsNullOrWhiteSpace(metaPhoneId))
-        {
-            try
-            {
-                var metaUrl = $"https://graph.facebook.com/v18.0/{metaPhoneId}/messages";
-                using var metaReq = new HttpRequestMessage(HttpMethod.Post, metaUrl);
-                metaReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", metaToken);
-                var metaPayload = new
-                {
-                    messaging_product = "whatsapp",
-                    recipient_type = "individual",
-                    to = cleanPhone,
-                    type = "text",
-                    text = new { preview_url = true, body = message }
-                };
-                metaReq.Content = new StringContent(JsonSerializer.Serialize(metaPayload), Encoding.UTF8, "application/json");
-
-                var metaResp = await client.SendAsync(metaReq);
-                if (metaResp.IsSuccessStatusCode)
-                {
-                    sentSuccessfully = true;
-                    _logger.LogInformation("[WhatsAppService] Dispatched via Meta Cloud API -> Recipient: {Phone} ({Name})", cleanPhone, recipientName);
-                }
-                else
-                {
-                    var metaErr = await metaResp.Content.ReadAsStringAsync();
-                    _logger.LogWarning("[WhatsAppService] Meta API responded with status {Code}: {Error}", metaResp.StatusCode, metaErr);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "[WhatsAppService] Error calling Meta Cloud API directly for {Phone}", cleanPhone);
-            }
-        }
-
-        // 2. Forward to CommunicationService for timeline logging and omnichannel audit
+        // CommunicationService owns Cloud API dispatch and timeline logging.
         try
         {
             var commBase = _configuration["Services:CommunicationService"] ?? "http://communication-service";
@@ -101,10 +59,9 @@ public class WhatsAppService : IWhatsAppService
             }
             else
             {
-                // Fallback to gateway if internal ACA DNS is unreachable
-                var gwUrl = "https://api.myschooladmissions.com/api/communications/send";
-                var gwResp = await client.PostAsJsonAsync(gwUrl, payload);
-                if (gwResp.IsSuccessStatusCode) sentSuccessfully = true;
+                var error = await resp.Content.ReadAsStringAsync();
+                _logger.LogWarning("[WhatsAppService] CommunicationService rejected message for {Phone} with status {StatusCode}: {Error}",
+                    cleanPhone, resp.StatusCode, error);
             }
         }
         catch (Exception ex)
@@ -113,10 +70,10 @@ public class WhatsAppService : IWhatsAppService
         }
 
         _logger.LogInformation(
-            "[WhatsAppService] Dispatched WhatsApp Notification -> Recipient: {Recipient} ({Name}) | DeepLink: {DeepLink} | Preview: {Preview}",
+            "[WhatsAppService] WhatsApp dispatch status {Status} -> Recipient: {Recipient} ({Name}) | Preview: {Preview}",
+            sentSuccessfully ? "Submitted" : "Failed",
             cleanPhone,
             recipientName ?? "Recipient",
-            deepLink,
             message.Length > 80 ? message.Substring(0, 80) + "..." : message);
 
         return sentSuccessfully;

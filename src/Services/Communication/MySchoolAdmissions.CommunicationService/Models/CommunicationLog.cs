@@ -10,7 +10,8 @@ public class CommunicationLog
     public string TemplateName { get; set; } = string.Empty;
     public string Subject { get; set; } = string.Empty;
     public string Content { get; set; } = string.Empty;
-    public string Status { get; set; } = "Delivered";
+    public string Status { get; set; } = "Logged";
+    public string? ProviderMessageId { get; set; }
     public string WhatsAppDeepLink { get; set; } = string.Empty;
     public DateTime SentAt { get; set; } = DateTime.UtcNow;
     public string HandledBy { get; set; } = "Admission Counselor";

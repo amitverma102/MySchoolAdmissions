@@ -100,4 +100,6 @@ jobs:
         with:
           inlineScript: |
             az containerapp update --name api-gateway --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --image ${{ env.ACR_NAME }}.azurecr.io/api-gateway:${{ github.sha }}
+            az containerapp update --name lead-service --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --image ${{ env.ACR_NAME }}.azurecr.io/lead-service:${{ github.sha }}
+            az containerapp update --name communication-service --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --image ${{ env.ACR_NAME }}.azurecr.io/communication-service:${{ github.sha }}
             az containerapp update --name web-portal --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --image ${{ env.ACR_NAME }}.azurecr.io/web-portal:${{ github.sha }}

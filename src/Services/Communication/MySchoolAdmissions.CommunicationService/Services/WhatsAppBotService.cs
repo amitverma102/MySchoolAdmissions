@@ -275,7 +275,9 @@ public class WhatsAppBotService : IWhatsAppBotService
 
         try
         {
-            var url = $"https://graph.facebook.com/v18.0/{phoneNumberId}/messages";
+            var apiVersion = _config["Meta:WhatsApp:ApiVersion"] ?? "v23.0";
+            if (!apiVersion.StartsWith('v')) apiVersion = $"v{apiVersion}";
+            var url = $"https://graph.facebook.com/{apiVersion}/{phoneNumberId}/messages";
             using var request = new HttpRequestMessage(HttpMethod.Post, url);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 
