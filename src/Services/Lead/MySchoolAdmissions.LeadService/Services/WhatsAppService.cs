@@ -1,4 +1,8 @@
 using System.Net.Http.Json;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
+using Microsoft.IdentityModel.Tokens;
 
 namespace MySchoolAdmissions.LeadService.Services;
 
@@ -52,7 +56,17 @@ public class WhatsAppService : IWhatsAppService
                 handledBy = "Admissions Automated System"
             };
 
-            var resp = await client.PostAsJsonAsync(commUrl, payload);
+            var serviceToken = CreateServiceToken();
+            if (serviceToken == null)
+            {
+                _logger.LogError("[WhatsAppService] Cannot authenticate to CommunicationService; JwtOptions are incomplete.");
+                return false;
+            }
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, commUrl);
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", serviceToken);
+            request.Content = JsonContent.Create(payload);
+            using var resp = await client.SendAsync(request);
             if (resp.IsSuccessStatusCode)
             {
                 sentSuccessfully = true;
@@ -77,6 +91,33 @@ public class WhatsAppService : IWhatsAppService
             message.Length > 80 ? message.Substring(0, 80) + "..." : message);
 
         return sentSuccessfully;
+    }
+
+    private string? CreateServiceToken()
+    {
+        var secret = _configuration["JwtOptions:Secret"];
+        var issuer = _configuration["JwtOptions:Issuer"];
+        var audience = _configuration["JwtOptions:Audience"];
+        if (string.IsNullOrWhiteSpace(secret) || string.IsNullOrWhiteSpace(issuer) || string.IsNullOrWhiteSpace(audience))
+        {
+            return null;
+        }
+
+        var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
+        var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256);
+        var token = new JwtSecurityToken(
+            issuer: issuer,
+            audience: audience,
+            claims: new[]
+            {
+                new Claim(ClaimTypes.Name, "lead-service"),
+                new Claim(ClaimTypes.Role, "InternalService")
+            },
+            notBefore: DateTime.UtcNow.AddSeconds(-5),
+            expires: DateTime.UtcNow.AddMinutes(5),
+            signingCredentials: credentials);
+
+        return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
     public async Task<bool> SendTourSlotAssignedWhatsAppAsync(TourSlotAssignedWhatsAppModel model)
