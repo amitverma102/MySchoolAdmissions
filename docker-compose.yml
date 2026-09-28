@@ -1,0 +1,223 @@
+version: '3.8'
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: myschooladmissions-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    restart: always
+
+  postgres:
+    image: pgvector/pgvector:pg15
+    container_name: myschooladmissions-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: MySchoolAdmissions
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    container_name: myschooladmissions-redis
+    ports:
+      - "6379:6379"
+    restart: always
+
+  identity-service:
+    build:
+      context: .
+      dockerfile: src/Services/Identity/MySchoolAdmissions.IdentityService/Dockerfile
+    container_name: myschooladmissions-identity-service
+    ports:
+      - "5001:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Host=postgres;Database=MySchoolAdmissionsIdentity;Username=postgres;Password=postgres
+      - RabbitMQHost=rabbitmq
+    depends_on:
+      - postgres
+      - rabbitmq
+
+  institution-service:
+    build:
+      context: .
+      dockerfile: src/Services/Institution/MySchoolAdmissions.InstitutionService/Dockerfile
+    container_name: myschooladmissions-institution-service
+    ports:
+      - "5002:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Host=postgres;Database=MySchoolAdmissionsInstitution;Username=postgres;Password=postgres
+      - RabbitMQHost=rabbitmq
+    depends_on:
+      - postgres
+      - rabbitmq
+
+  lead-service:
+    build:
+      context: .
+      dockerfile: src/Services/Lead/MySchoolAdmissions.LeadService/Dockerfile
+    container_name: myschooladmissions-lead-service
+    ports:
+      - "5003:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Host=postgres;Database=MySchoolAdmissionsLead;Username=postgres;Password=postgres
+      - RabbitMQHost=rabbitmq
+      - Services__AiServiceUrl=http://ai-service:8080
+    depends_on:
+      - postgres
+      - rabbitmq
+      - ai-service
+
+  application-service:
+    build:
+      context: .
+      dockerfile: src/Services/Application/MySchoolAdmissions.ApplicationService/Dockerfile
+    container_name: myschooladmissions-application-service
+    ports:
+      - "5004:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Host=postgres;Database=MySchoolAdmissionsApplication;Username=postgres;Password=postgres
+      - RabbitMQHost=rabbitmq
+    depends_on:
+      - postgres
+      - rabbitmq
+
+  configuration-service:
+    build:
+      context: .
+      dockerfile: src/Services/Configuration/MySchoolAdmissions.ConfigurationService/Dockerfile
+    container_name: myschooladmissions-configuration-service
+    ports:
+      - "5005:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Host=postgres;Database=MySchoolAdmissionsConfiguration;Username=postgres;Password=postgres
+    depends_on:
+      - postgres
+
+  enrollment-service:
+    build:
+      context: .
+      dockerfile: src/Services/Enrollment/MySchoolAdmissions.EnrollmentService/Dockerfile
+    container_name: myschooladmissions-enrollment-service
+    ports:
+      - "5006:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Host=postgres;Database=MySchoolAdmissionsEnrollment;Username=postgres;Password=postgres
+      - RabbitMQHost=rabbitmq
+    depends_on:
+      - postgres
+      - rabbitmq
+
+  ai-service:
+    build:
+      context: .
+      dockerfile: src/Services/AI/MySchoolAdmissions.AIService/Dockerfile
+    container_name: myschooladmissions-ai-service
+    ports:
+      - "5009:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Host=postgres;Database=myschooladmissionsai;Username=postgres;Password=postgres
+      - InstitutionServiceUrl=http://institution-service:8080
+      - AI__Provider=Auto
+      - AI__OllamaHost=http://host.docker.internal:11434
+    depends_on:
+      - postgres
+
+  reporting-service:
+    build:
+      context: .
+      dockerfile: src/Services/Reporting/MySchoolAdmissions.ReportingService/Dockerfile
+    container_name: myschooladmissions-reporting-service
+    ports:
+      - "5008:8080"
+    environment:
+      - ConnectionStrings__DefaultConnection=Host=postgres;Database=MySchoolAdmissions_Reporting;Username=postgres;Password=postgres
+      - RabbitMQHost=rabbitmq
+    depends_on:
+      - postgres
+      - rabbitmq
+
+  marketing-service:
+    build:
+      context: .
+      dockerfile: src/Services/Marketing/MySchoolAdmissions.MarketingService/Dockerfile
+    container_name: myschooladmissions-marketing-service
+    ports:
+      - "5007:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Host=postgres;Database=MySchoolAdmissionsMarketing;Username=postgres;Password=postgres
+    depends_on:
+      - postgres
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: src/ApiGateway/MySchoolAdmissions.ApiGateway/Dockerfile
+    container_name: myschooladmissions-api-gateway
+    ports:
+      - "5010:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+    depends_on:
+      - identity-service
+      - institution-service
+      - lead-service
+      - application-service
+      - configuration-service
+      - enrollment-service
+      - marketing-service
+      - reporting-service
+      - ai-service
+      - communication-service
+  communication-service:
+    build:
+      context: .
+      dockerfile: src/Services/Communication/MySchoolAdmissions.CommunicationService/Dockerfile
+    container_name: myschooladmissions-communication-service
+    ports:
+      - "5011:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - RabbitMQHost=rabbitmq
+      - Services__AiServiceUrl=http://ai-service:8080
+      - Services__LeadServiceUrl=http://lead-service:8080
+      - Meta__WhatsApp__VerifyToken=myschooladmissions_whatsapp_secret_2026
+    depends_on:
+      - rabbitmq
+      - ai-service
+      - lead-service
+
+  web-portal:
+    build:
+      context: ./src/Web/my-school-admissions-web
+      dockerfile: Dockerfile
+    container_name: myschooladmissions-web-portal
+    ports:
+      - "80:80"
+      - "3000:80"
+    depends_on:
+      - api-gateway
+    restart: always
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
+

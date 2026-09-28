@@ -1,0 +1,41 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/ApiGateway/">
+    <Project Path="src/ApiGateway/MySchoolAdmissions.ApiGateway/MySchoolAdmissions.ApiGateway.csproj" />
+  </Folder>
+  <Folder Name="/src/BuildingBlocks/">
+    <Project Path="src/BuildingBlocks/MySchoolAdmissions.Core/MySchoolAdmissions.Core.csproj" />
+    <Project Path="src/BuildingBlocks/MySchoolAdmissions.EventBus/MySchoolAdmissions.EventBus.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/" />
+  <Folder Name="/src/Services/Application/">
+    <Project Path="src/Services/Application/MySchoolAdmissions.ApplicationService/MySchoolAdmissions.ApplicationService.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/Communication/">
+    <Project Path="src/Services/Communication/MySchoolAdmissions.CommunicationService/MySchoolAdmissions.CommunicationService.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/Configuration/">
+    <Project Path="src/Services/Configuration/MySchoolAdmissions.ConfigurationService/MySchoolAdmissions.ConfigurationService.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/Enrollment/">
+    <Project Path="src/Services/Enrollment/MySchoolAdmissions.EnrollmentService/MySchoolAdmissions.EnrollmentService.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/Identity/">
+    <Project Path="src/Services/Identity/MySchoolAdmissions.IdentityService/MySchoolAdmissions.IdentityService.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/Institution/">
+    <Project Path="src/Services/Institution/MySchoolAdmissions.InstitutionService/MySchoolAdmissions.InstitutionService.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/Lead/">
+    <Project Path="src/Services/Lead/MySchoolAdmissions.LeadService/MySchoolAdmissions.LeadService.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/Marketing/">
+    <Project Path="src/Services/Marketing/MySchoolAdmissions.MarketingService/MySchoolAdmissions.MarketingService.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/Reporting/">
+    <Project Path="src/Services/Reporting/MySchoolAdmissions.ReportingService/MySchoolAdmissions.ReportingService.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/AI/">
+    <Project Path="src/Services/AI/MySchoolAdmissions.AIService/MySchoolAdmissions.AIService.csproj" />
+  </Folder>
+</Solution>

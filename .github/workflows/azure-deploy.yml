@@ -1,0 +1,103 @@
+name: Azure Production CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+env:
+  AZURE_RESOURCE_GROUP: rg-edukey-admissions-prod
+  ACR_NAME: credukeyadmprod
+  CONTAINER_APP_ENV: cae-edukeyadm-prod
+
+jobs:
+  build-and-test:
+    name: Build & Test Microservices & Web
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore Dependencies
+        run: dotnet restore MySchoolAdmissions.slnx
+
+      - name: Build Solution
+        run: dotnet build MySchoolAdmissions.slnx --no-restore -c Release
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: src/Web/my-school-admissions-web/package-lock.json
+
+      - name: Build Web Application
+        working-directory: src/Web/my-school-admissions-web
+        run: |
+          npm ci
+          npm run build
+
+  deploy-infrastructure-and-apps:
+    name: Deploy to Azure
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy Bicep Infrastructure
+        uses: azure/arm-deploy@v2
+        with:
+          subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          resourceGroupName: ${{ env.AZURE_RESOURCE_GROUP }}
+          template: ./infra/main.bicep
+          parameters: ./infra/main.parameters.json postgresAdminPassword='${{ secrets.POSTGRES_ADMIN_PASSWORD }}'
+
+      - name: Login to Azure Container Registry
+        uses: azure/docker-login@v1
+        with:
+          login-server: ${{ env.ACR_NAME }}.azurecr.io
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Build and Push Docker Images
+        run: |
+          services=(
+            "api-gateway:src/ApiGateway/MySchoolAdmissions.ApiGateway/Dockerfile"
+            "identity-service:src/Services/Identity/MySchoolAdmissions.IdentityService/Dockerfile"
+            "institution-service:src/Services/Institution/MySchoolAdmissions.InstitutionService/Dockerfile"
+            "lead-service:src/Services/Lead/MySchoolAdmissions.LeadService/Dockerfile"
+            "application-service:src/Services/Application/MySchoolAdmissions.ApplicationService/Dockerfile"
+            "configuration-service:src/Services/Configuration/MySchoolAdmissions.ConfigurationService/Dockerfile"
+            "enrollment-service:src/Services/Enrollment/MySchoolAdmissions.EnrollmentService/Dockerfile"
+            "marketing-service:src/Services/Marketing/MySchoolAdmissions.MarketingService/Dockerfile"
+            "reporting-service:src/Services/Reporting/MySchoolAdmissions.ReportingService/Dockerfile"
+            "ai-service:src/Services/AI/MySchoolAdmissions.AIService/Dockerfile"
+            "communication-service:src/Services/Communication/MySchoolAdmissions.CommunicationService/Dockerfile"
+            "web-portal:src/Web/my-school-admissions-web/Dockerfile"
+          )
+          for item in "${services[@]}"; do
+            name="${item%%:*}"
+            file="${item##*:}"
+            echo "Building $name..."
+            docker build -t ${{ env.ACR_NAME }}.azurecr.io/$name:${{ github.sha }} -t ${{ env.ACR_NAME }}.azurecr.io/$name:latest -f $file .
+            docker push ${{ env.ACR_NAME }}.azurecr.io/$name:${{ github.sha }}
+            docker push ${{ env.ACR_NAME }}.azurecr.io/$name:latest
+          done
+
+      - name: Deploy Container Apps
+        uses: azure/CLI@v2
+        with:
+          inlineScript: |
+            az containerapp update --name api-gateway --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --image ${{ env.ACR_NAME }}.azurecr.io/api-gateway:${{ github.sha }}
+            az containerapp update --name web-portal --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --image ${{ env.ACR_NAME }}.azurecr.io/web-portal:${{ github.sha }}

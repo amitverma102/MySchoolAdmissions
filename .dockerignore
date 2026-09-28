@@ -1,0 +1,15 @@
+**/*/bin/
+**/*/obj/
+**/bin/
+**/obj/
+bin/
+obj/
+.git/
+.vs/
+.vscode/
+*.user
+*.suo
+*.userprefs
+**/node_modules/
+**/dist/
+.agents/

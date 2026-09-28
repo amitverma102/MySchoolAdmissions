@@ -1,0 +1,19 @@
+﻿namespace MySchoolAdmissions.IdentityService.Models;
+
+public class User
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string FirstName { get; set; } = string.Empty;
+    public string LastName { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string PasswordHash { get; set; } = string.Empty;
+    
+    // Support for Tenant Isolation
+    public Guid? InstitutionId { get; set; } 
+    public Guid? CampusId { get; set; }
+    
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
+}

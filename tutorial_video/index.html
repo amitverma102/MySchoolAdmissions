@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MySchoolAdmissions - End-to-End Product Video Tutorial</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #0b0f19;
+      --card-bg: rgba(22, 29, 49, 0.85);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --accent: #10b981;
+      --accent-purple: #8b5cf6;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background-color: var(--bg-dark);
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.15) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(139, 92, 246, 0.15) 0px, transparent 50%);
+      color: var(--text-main);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 24px 40px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--card-border);
+      backdrop-filter: blur(12px);
+      background: rgba(11, 15, 25, 0.7);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .logo-badge {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #2563eb, #7c3aed);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 8px 16px rgba(37, 99, 235, 0.35);
+      font-weight: 800;
+      font-size: 20px;
+    }
+
+    .brand-title h1 {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .brand-title p {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 12px;
+    }
+
+    .btn {
+      padding: 10px 18px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      border: 1px solid transparent;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #2563eb, #3b82f6);
+      color: white;
+      box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
+    }
+
+    .btn-primary:hover {
+      background: linear-gradient(135deg, #1d4ed8, #2563eb);
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.05);
+      border-color: var(--card-border);
+      color: var(--text-main);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .main-container {
+      max-width: 1480px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 32px 40px;
+      display: grid;
+      grid-template-columns: 1fr 420px;
+      gap: 32px;
+      flex: 1;
+    }
+
+    .video-viewport-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .video-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+      position: relative;
+    }
+
+    .video-header-bar {
+      padding: 14px 20px;
+      background: rgba(0, 0, 0, 0.4);
+      border-bottom: 1px solid var(--card-border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .video-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 10px var(--accent);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.15); opacity: 1; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+
+    .video-container {
+      position: relative;
+      width: 100%;
+      background: #000;
+      aspect-ratio: 16 / 9;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .video-container img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .video-meta-bar {
+      padding: 20px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(15, 23, 42, 0.6);
+      border-top: 1px solid var(--card-border);
+    }
+
+    .meta-title h2 {
+      font-size: 18px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .meta-title p {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .file-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      background: rgba(59, 130, 246, 0.15);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      color: #60a5fa;
+      border-radius: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+    }
+
+    .sidebar-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .chapters-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      padding: 24px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+      display: flex;
+      flex-direction: column;
+      max-height: calc(100vh - 160px);
+      overflow-y: auto;
+    }
+
+    .chapters-card h3 {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .chapters-card p.subtitle {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 18px;
+    }
+
+    .chapter-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .chapter-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 12px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-decoration: none;
+      color: inherit;
+    }
+
+    .chapter-item:hover {
+      background: rgba(59, 130, 246, 0.08);
+      border-color: rgba(59, 130, 246, 0.3);
+      transform: translateX(4px);
+    }
+
+    .chapter-num {
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.08);
+      color: #94a3b8;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .chapter-item:hover .chapter-num {
+      background: var(--primary);
+      color: white;
+    }
+
+    .chapter-info h4 {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: #f1f5f9;
+    }
+
+    .chapter-info p {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 3px;
+      line-height: 1.4;
+    }
+
+    .quick-specs {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 8px;
+    }
+
+    .spec-box {
+      background: rgba(15, 23, 42, 0.5);
+      border: 1px solid var(--card-border);
+      padding: 12px;
+      border-radius: 12px;
+      text-align: center;
+    }
+
+    .spec-box span {
+      font-size: 11px;
+      color: var(--text-muted);
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .spec-box strong {
+      font-size: 14px;
+      color: #e2e8f0;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    footer {
+      border-top: 1px solid var(--card-border);
+      padding: 20px 40px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--text-muted);
+      font-size: 13px;
+      margin-top: auto;
+    }
+
+    @media (max-width: 1024px) {
+      .main-container {
+        grid-template-columns: 1fr;
+      }
+      .chapters-card {
+        max-height: none;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <div class="logo-badge">🎓</div>
+      <div class="brand-title">
+        <h1>MySchoolAdmissions</h1>
+        <p>Comprehensive Product Walkthrough & Video Tutorial</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <a href="http://localhost:5173/tutorial" target="_blank" class="btn btn-secondary">
+        <span>🎬 Open In-App Theater</span>
+      </a>
+      <a href="http://localhost:5173" target="_blank" class="btn btn-primary">
+        <span>🚀 Launch Web App</span>
+      </a>
+    </div>
+  </header>
+
+  <main class="main-container">
+    <div class="video-viewport-panel">
+      <div class="video-card">
+        <div class="video-header-bar">
+          <div class="video-status">
+            <div class="status-dot"></div>
+            <span>End-to-End Walkthrough Demonstration</span>
+          </div>
+          <div>All 12 Modules Verified</div>
+        </div>
+
+        <div class="video-container" id="videoBox">
+          <img src="MySchoolAdmissions_End_to_End_Tutorial.webp" alt="MySchoolAdmissions End-to-End Walkthrough Animation" id="videoElement">
+        </div>
+
+        <div class="video-meta-bar">
+          <div class="meta-title">
+            <h2>Full Application Walkthrough & Tutorial</h2>
+            <p>12 Integrated Micro-workflows from Public Portal to Drive Telephony</p>
+          </div>
+          <div class="file-badge">
+            <span>💾 17.84 MB • 998 Frames</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="quick-specs">
+        <div class="spec-box">
+          <span>SOURCE FILE</span>
+          <strong>Tutorial.webp</strong>
+        </div>
+        <div class="spec-box">
+          <span>FRAME COUNT</span>
+          <strong>998 Frames</strong>
+        </div>
+        <div class="spec-box">
+          <span>STATUS</span>
+          <strong style="color: #10b981;">✓ Local Drive Saved</strong>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-panel">
+      <div class="chapters-card">
+        <h3>
+          <span>Video Chapters</span>
+          <span style="font-size: 12px; color: #60a5fa; font-weight: normal;">12 Modules</span>
+        </h3>
+        <p class="subtitle">Complete journey recorded from live application</p>
+
+        <div class="chapter-list">
+          <div class="chapter-item">
+            <div class="chapter-num">01</div>
+            <div class="chapter-info">
+              <h4>Public Portal & Smart Enquiries</h4>
+              <p>Landing page branding, instant inquiry validation, and parent status tracker.</p>
+            </div>
+          </div>
+
+          <div class="chapter-item">
+            <div class="chapter-num">02</div>
+            <div class="chapter-info">
+              <h4>Case-Insensitive Authentication</h4>
+              <p>JWT auth normalization for uppercase/mixed emails and role permissions.</p>
+            </div>
+          </div>
+
+          <div class="chapter-item">
+            <div class="chapter-num">03</div>
+            <div class="chapter-info">
+              <h4>Executive Dashboard KPIs</h4>
+              <p>Real-time analytics, conversion velocity, and dynamic sidebar highlighting.</p>
+            </div>
+          </div>
+
+          <div class="chapter-item">
+            <div class="chapter-num">04</div>
+            <div class="chapter-info">
+              <h4>Lead Heat Scoring & Call Recorder</h4>
+              <p>AI intent 0-100 score, voice waveform recording, and direct Google Drive sync.</p>
+            </div>
+          </div>
+
+          <div class="chapter-item">
+            <div class="chapter-num">05</div>
+            <div class="chapter-info">
+              <h4>Counselor Skill Matrix</h4>
+              <p>Curriculum tags (IB, Cambridge, CBSE) and intelligent automated lead routing.</p>
+            </div>
+          </div>
+
+          <div class="chapter-item">
+            <div class="chapter-num">06</div>
+            <div class="chapter-info">
+              <h4>Direct Application & Photo Upload</h4>
+              <p>Direct entry modal with live student photograph preview and profile avatar.</p>
+            </div>
+          </div>
+
+          <div class="chapter-item">
+            <div class="chapter-num">07</div>
+            <div class="chapter-info">
+              <h4>Dynamic Form Builder</h4>
+              <p>Custom drag-and-drop form elements, validation rules, and parent questionnaires.</p>
+            </div>
+          </div>
+
+          <div class="chapter-item">
+            <div class="chapter-num">08</div>
+            <div class="chapter-info">
+              <h4>Admissions Calendar & Tour Booker</h4>
+              <p>Interactive schedule with conflict-free campus tour scheduling modal.</p>
+            </div>
+          </div>
+
+          <div class="chapter-item">
+            <div class="chapter-num">09</div>
+            <div class="chapter-info">
+              <h4>Enrollments & Fee Concessions</h4>
+              <p>Scholarship categories, percentage/flat discounts, and multi-tier approvals.</p>
+            </div>
+          </div>
+
+          <div class="chapter-item">
+            <div class="chapter-num">10</div>
+            <div class="chapter-info">
+              <h4>Campaign Intelligence & CAC</h4>
+              <p>Digital marketing attribution across Google, Meta, and Education Expos.</p>
+            </div>
+          </div>
+
+          <div class="chapter-item">
+            <div class="chapter-num">11</div>
+            <div class="chapter-info">
+              <h4>Settings & Google Drive Telephony</h4>
+              <p>Google Drive folder mapping, OAuth connection, and storage quota monitor.</p>
+            </div>
+          </div>
+
+          <div class="chapter-item">
+            <div class="chapter-num">12</div>
+            <div class="chapter-info">
+              <h4>In-App Video Tutorial Theater</h4>
+              <p>Embedded 10-chapter learning center with synced simulation scenes.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div>MySchoolAdmissions (EduKeyAdmissionAssist) • Local Walkthrough Video</div>
+    <div>Saved to: <code>c:\SourceCode\EduKeyAdmissionAssist\tutorial_video\</code></div>
+  </footer>
+
+</body>
+</html>

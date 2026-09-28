@@ -1,0 +1,33 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": {
+      "value": "prod"
+    },
+    "location": {
+      "value": "centralindia"
+    },
+    "resourcePrefix": {
+      "value": "edukeyadm"
+    },
+    "postgresAdminUser": {
+      "value": "admissionsadmin"
+    },
+    "postgresAdminPassword": {
+      "value": "EduKeyAdmission#SecurePass2026!"
+    },
+    "razorpayKeyId": {
+      "value": "rzp_live_EduKeyAdmissions2026"
+    },
+    "razorpayKeySecret": {
+      "value": "rzp_sec_EduKeyAdmissionsLiveSecureSecret99"
+    },
+    "razorpayWebhookSecret": {
+      "value": "rzp_whsec_EduKeyAdmissionsHook2026"
+    },
+    "jwtSecretKey": {
+      "value": "edukey-school-admissions-production-enterprise-jwt-signing-secret-key-32chars-min!"
+    }
+  }
+}

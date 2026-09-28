@@ -1,0 +1,6 @@
+﻿@MySchoolAdmissions.EnrollmentService_HostAddress = http://localhost:5269
+
+GET {{MySchoolAdmissions.EnrollmentService_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
