@@ -59,6 +59,29 @@ public class CounselorsController : ControllerBase
                 targetInstId = tGuid;
         }
 
+        // Auto-heal legacy profiles with missing InstitutionId based on email domain
+        var unassignedProfiles = await _context.CounselorProfiles
+            .Where(p => p.InstitutionId == null)
+            .ToListAsync();
+        if (unassignedProfiles.Count > 0)
+        {
+            var disId = Guid.Parse("fc49d553-b44f-4c4c-96ad-4bf599016c01");
+            var svisId = Guid.Parse("a48d7782-dda9-42ad-b21a-046d517f1ce5");
+            foreach (var p in unassignedProfiles)
+            {
+                if (!string.IsNullOrEmpty(p.Email) && p.Email.Contains("@svis", StringComparison.OrdinalIgnoreCase))
+                {
+                    p.InstitutionId = svisId;
+                }
+                else
+                {
+                    p.InstitutionId = disId;
+                }
+                p.UpdatedAt = DateTime.UtcNow;
+            }
+            await _context.SaveChangesAsync();
+        }
+
         var query = _context.CounselorProfiles.AsQueryable();
         if (targetInstId.HasValue)
         {
@@ -69,7 +92,7 @@ public class CounselorsController : ControllerBase
 
         var activeCounts = await _context.Enquiries
             .Where(e => e.AssignedToId != null && e.Status != "Qualified" && e.Status != "Lost")
-            .Where(e => !targetInstId.HasValue || e.InstitutionId == targetInstId.Value)
+            .Where(e => !targetInstId.HasValue || (targetInstId.Value == Guid.Parse("fc49d553-b44f-4c4c-96ad-4bf599016c01") ? (e.InstitutionId == targetInstId.Value || e.InstitutionId == null) : e.InstitutionId == targetInstId.Value))
             .GroupBy(e => e.AssignedToId!.Value)
             .Select(g => new { CounselorId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(g => g.CounselorId, g => g.Count);
@@ -138,6 +161,24 @@ public class CounselorsController : ControllerBase
         if (!isSuperAdmin && !userInstitutionId.HasValue) return Forbid();
         if (!isSuperAdmin) dto.InstitutionId = userInstitutionId;
 
+        var disId = Guid.Parse("fc49d553-b44f-4c4c-96ad-4bf599016c01");
+        var svisId = Guid.Parse("a48d7782-dda9-42ad-b21a-046d517f1ce5");
+
+        Guid? resolvedInstId = dto.InstitutionId;
+        if (!resolvedInstId.HasValue && !string.IsNullOrEmpty(dto.Email))
+        {
+            if (dto.Email.Contains("@svis", StringComparison.OrdinalIgnoreCase))
+                resolvedInstId = svisId;
+            else if (dto.Email.Contains("@dis", StringComparison.OrdinalIgnoreCase))
+                resolvedInstId = disId;
+        }
+        if (!resolvedInstId.HasValue && Request.Headers.TryGetValue("X-Institution-Id", out var hInst) && Guid.TryParse(hInst, out var hGuid))
+            resolvedInstId = hGuid;
+        if (!resolvedInstId.HasValue && Request.Headers.TryGetValue("X-Tenant-Id", out var tInst) && Guid.TryParse(tInst, out var tGuid))
+            resolvedInstId = tGuid;
+        if (!resolvedInstId.HasValue && userInstitutionId.HasValue)
+            resolvedInstId = userInstitutionId;
+
         var profile = await _context.CounselorProfiles.FirstOrDefaultAsync(p => p.UserId == dto.UserId);
         if (profile != null && !CanAccessProfile(profile)) return Forbid();
 
@@ -145,10 +186,11 @@ public class CounselorsController : ControllerBase
         {
             profile = new CounselorSkillProfile
             {
+                Id = Guid.NewGuid(),
                 UserId = dto.UserId,
                 CounselorName = dto.CounselorName,
                 Email = dto.Email,
-                InstitutionId = dto.InstitutionId,
+                InstitutionId = resolvedInstId ?? disId,
                 CampusId = dto.CampusId,
                 LanguagesKnown = dto.LanguagesKnown ?? new List<string>(),
                 HandledClasses = dto.HandledClasses ?? new List<string>(),
@@ -166,8 +208,18 @@ public class CounselorsController : ControllerBase
         {
             profile.CounselorName = dto.CounselorName;
             profile.Email = dto.Email;
-            profile.InstitutionId = dto.InstitutionId;
-            profile.CampusId = dto.CampusId;
+            if (dto.InstitutionId.HasValue)
+            {
+                profile.InstitutionId = dto.InstitutionId.Value;
+            }
+            else if (!profile.InstitutionId.HasValue)
+            {
+                profile.InstitutionId = resolvedInstId ?? disId;
+            }
+            if (dto.CampusId.HasValue)
+            {
+                profile.CampusId = dto.CampusId.Value;
+            }
             profile.LanguagesKnown = dto.LanguagesKnown ?? new List<string>();
             profile.HandledClasses = dto.HandledClasses ?? new List<string>();
             profile.Regions = dto.Regions ?? new List<string>();

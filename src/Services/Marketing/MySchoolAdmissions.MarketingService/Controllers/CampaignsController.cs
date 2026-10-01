@@ -68,9 +68,18 @@ public class CampaignsController : ControllerBase
 
         var query = _context.Campaigns.AsQueryable();
         var selectedInstitutionId = GetSelectedInstitutionId(institutionId);
-        if (!selectedInstitutionId.HasValue && !GetUserContext().isSuperAdmin) return Forbid();
         if (selectedInstitutionId.HasValue) 
-            query = query.Where(c => c.InstitutionId == selectedInstitutionId.Value);
+        {
+            var disId = Guid.Parse("fc49d553-b44f-4c4c-96ad-4bf599016c01");
+            if (selectedInstitutionId.Value == disId)
+            {
+                query = query.Where(c => c.InstitutionId == selectedInstitutionId.Value || c.InstitutionId == null);
+            }
+            else
+            {
+                query = query.Where(c => c.InstitutionId == selectedInstitutionId.Value);
+            }
+        }
 
         if (!string.IsNullOrWhiteSpace(schoolName))
             query = query.Where(c => c.SchoolName.ToLower() == schoolName.ToLower());

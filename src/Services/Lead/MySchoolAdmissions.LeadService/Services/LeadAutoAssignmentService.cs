@@ -44,7 +44,7 @@ public class LeadAutoAssignmentService : ILeadAutoAssignmentService
             PreferredLanguage = enquiry.PreferredLanguage,
             Region = enquiry.Region,
             Religion = enquiry.Religion,
-            InstitutionId = enquiry.InstitutionId,
+            InstitutionId = enquiry.InstitutionId ?? Guid.Parse("fc49d553-b44f-4c4c-96ad-4bf599016c01"),
             CampusId = enquiry.CampusId
         };
 
@@ -200,7 +200,7 @@ public class LeadAutoAssignmentService : ILeadAutoAssignmentService
             PreferredLanguage = enquiry.PreferredLanguage,
             Region = enquiry.Region,
             Religion = enquiry.Religion,
-            InstitutionId = enquiry.InstitutionId,
+            InstitutionId = enquiry.InstitutionId ?? Guid.Parse("fc49d553-b44f-4c4c-96ad-4bf599016c01"),
             CampusId = enquiry.CampusId
         };
 
@@ -323,7 +323,7 @@ public class LeadAutoAssignmentService : ILeadAutoAssignmentService
         var profilesQuery = _context.CounselorProfiles.AsQueryable();
         if (criteria.InstitutionId.HasValue)
         {
-            profilesQuery = profilesQuery.Where(p => p.InstitutionId == null || p.InstitutionId == criteria.InstitutionId.Value);
+            profilesQuery = profilesQuery.Where(p => p.InstitutionId == criteria.InstitutionId.Value);
         }
 
         var profiles = await profilesQuery.ToListAsync();

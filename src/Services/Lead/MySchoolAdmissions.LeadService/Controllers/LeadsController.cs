@@ -400,6 +400,23 @@ public class LeadsController : ControllerBase
         return NoContent();
     }
     
+    private static bool IsCounselorInInstitution(CounselorSkillProfile counselor, Guid targetInstId)
+    {
+        var disId = Guid.Parse("fc49d553-b44f-4c4c-96ad-4bf599016c01");
+        var svisId = Guid.Parse("a48d7782-dda9-42ad-b21a-046d517f1ce5");
+
+        var counselorInstId = counselor.InstitutionId;
+        if (!counselorInstId.HasValue && !string.IsNullOrEmpty(counselor.Email))
+        {
+            if (counselor.Email.Contains("@svis", StringComparison.OrdinalIgnoreCase))
+                counselorInstId = svisId;
+            else if (counselor.Email.Contains("@dis", StringComparison.OrdinalIgnoreCase))
+                counselorInstId = disId;
+        }
+
+        return counselorInstId.HasValue && counselorInstId.Value == targetInstId;
+    }
+
     [HttpPut("{id}/assign")]
     public async Task<IActionResult> AssignEnquiry(Guid id, [FromBody] Guid? assignedToId)
     {
@@ -407,11 +424,49 @@ public class LeadsController : ControllerBase
         if (enquiry == null) return NotFound();
         if (!CanAccessEnquiry(enquiry)) return Forbid();
 
+        var prevAssignedId = enquiry.AssignedToId;
         enquiry.AssignedToId = assignedToId;
         enquiry.AssignedAt = DateTime.UtcNow;
+
         if (assignedToId.HasValue)
         {
-            enquiry.AutoAssignmentReason = "Manually assigned by Admissions Staff.";
+            var targetInstId = enquiry.InstitutionId ?? Guid.Parse("fc49d553-b44f-4c4c-96ad-4bf599016c01");
+            var profile = await _context.CounselorProfiles.FirstOrDefaultAsync(c => c.UserId == assignedToId.Value);
+            if (profile != null && !IsCounselorInInstitution(profile, targetInstId))
+            {
+                return BadRequest(new { message = "Counselor does not belong to the institution for this lead." });
+            }
+            string name = profile?.CounselorName ?? "Admissions Counselor";
+            enquiry.AutoAssignmentReason = $"Manually assigned to {name} by Admissions Staff.";
+
+            if (prevAssignedId != assignedToId)
+            {
+                var log = new InteractionHistory
+                {
+                    EnquiryId = enquiry.Id,
+                    InteractionType = "Counselor Assignment",
+                    Disposition = "Manual Assigned",
+                    Notes = $"Primary Counselor manually assigned to {name}.",
+                    InteractionDate = DateTime.UtcNow
+                };
+                _context.InteractionHistories.Add(log);
+            }
+        }
+        else
+        {
+            enquiry.AutoAssignmentReason = null;
+            if (prevAssignedId.HasValue)
+            {
+                var log = new InteractionHistory
+                {
+                    EnquiryId = enquiry.Id,
+                    InteractionType = "Counselor Assignment",
+                    Disposition = "Unassigned",
+                    Notes = "Primary Counselor manually unassigned.",
+                    InteractionDate = DateTime.UtcNow
+                };
+                _context.InteractionHistories.Add(log);
+            }
         }
         await _context.SaveChangesAsync();
         
@@ -425,30 +480,271 @@ public class LeadsController : ControllerBase
         if (enquiry == null) return NotFound();
         if (!CanAccessEnquiry(enquiry)) return Forbid();
 
+        var prevCoId = enquiry.CoCounselorId;
         enquiry.CoCounselorId = coCounselorId;
         if (coCounselorId.HasValue)
         {
+            var targetInstId = enquiry.InstitutionId ?? Guid.Parse("fc49d553-b44f-4c4c-96ad-4bf599016c01");
             var profile = await _context.CounselorProfiles.FirstOrDefaultAsync(c => c.UserId == coCounselorId.Value);
+            if (profile != null && !IsCounselorInInstitution(profile, targetInstId))
+            {
+                return BadRequest(new { message = "Co-counselor does not belong to the institution for this lead." });
+            }
             string name = profile?.CounselorName ?? "Admissions Staff";
             enquiry.CoCounselorReason = $"Manually designated Co-Counselor: {name}";
 
-            var log = new InteractionHistory
+            if (prevCoId != coCounselorId)
             {
-                EnquiryId = enquiry.Id,
-                InteractionType = "Co-Counselor Assignment",
-                Disposition = "Manual Assigned",
-                Notes = $"Co-Counselor manually designated as {name}.",
-                InteractionDate = DateTime.UtcNow
-            };
-            _context.InteractionHistories.Add(log);
+                var log = new InteractionHistory
+                {
+                    EnquiryId = enquiry.Id,
+                    InteractionType = "Co-Counselor Assignment",
+                    Disposition = "Manual Assigned",
+                    Notes = $"Co-Counselor manually designated as {name}.",
+                    InteractionDate = DateTime.UtcNow
+                };
+                _context.InteractionHistories.Add(log);
+            }
         }
         else
         {
             enquiry.CoCounselorReason = null;
+            if (prevCoId.HasValue)
+            {
+                var log = new InteractionHistory
+                {
+                    EnquiryId = enquiry.Id,
+                    InteractionType = "Co-Counselor Assignment",
+                    Disposition = "Unassigned",
+                    Notes = "Co-Counselor manually unassigned.",
+                    InteractionDate = DateTime.UtcNow
+                };
+                _context.InteractionHistories.Add(log);
+            }
         }
 
         await _context.SaveChangesAsync();
         return NoContent();
+    }
+
+    [HttpPut("{id}/counselors")]
+    public async Task<IActionResult> AssignCounselors(Guid id, [FromBody] AssignCounselorsDto dto)
+    {
+        var enquiry = await _context.Enquiries
+            .Include(e => e.Interactions)
+            .Include(e => e.LeadSource)
+            .Include(e => e.Campaign)
+            .FirstOrDefaultAsync(e => e.Id == id);
+
+        if (enquiry == null) return NotFound();
+        if (!CanAccessEnquiry(enquiry)) return Forbid();
+
+        var targetInstId = enquiry.InstitutionId ?? Guid.Parse("fc49d553-b44f-4c4c-96ad-4bf599016c01");
+
+        // Validate counselors belong to the lead's institution
+        if (dto.AssignedToId.HasValue)
+        {
+            var p = await _context.CounselorProfiles.FirstOrDefaultAsync(c => c.UserId == dto.AssignedToId.Value);
+            if (p != null && !IsCounselorInInstitution(p, targetInstId))
+            {
+                return BadRequest(new { message = "Primary counselor does not belong to the institution for this lead." });
+            }
+        }
+
+        if (dto.CoCounselorId.HasValue)
+        {
+            var coP = await _context.CounselorProfiles.FirstOrDefaultAsync(c => c.UserId == dto.CoCounselorId.Value);
+            if (coP != null && !IsCounselorInInstitution(coP, targetInstId))
+            {
+                return BadRequest(new { message = "Co-counselor does not belong to the institution for this lead." });
+            }
+        }
+
+        var counselorDict = await _context.CounselorProfiles
+            .ToDictionaryAsync(c => c.UserId, c => c.CounselorName);
+
+        // 1. Process Primary Counselor Assignment
+        var prevPrimaryId = enquiry.AssignedToId;
+        enquiry.AssignedToId = dto.AssignedToId;
+        if (dto.AssignedToId.HasValue)
+        {
+            enquiry.AssignedAt = DateTime.UtcNow;
+            counselorDict.TryGetValue(dto.AssignedToId.Value, out var primaryName);
+            primaryName ??= "Admissions Counselor";
+
+            enquiry.AutoAssignmentReason = !string.IsNullOrWhiteSpace(dto.AssignmentNotes) 
+                ? dto.AssignmentNotes 
+                : $"Manually assigned to {primaryName} by Admissions Staff.";
+
+            if (prevPrimaryId != dto.AssignedToId)
+            {
+                _context.InteractionHistories.Add(new InteractionHistory
+                {
+                    EnquiryId = enquiry.Id,
+                    InteractionType = "Counselor Assignment",
+                    Disposition = "Manual Assigned",
+                    Notes = $"Primary Counselor manually set to {primaryName}. {(string.IsNullOrWhiteSpace(dto.AssignmentNotes) ? "" : $"Note: {dto.AssignmentNotes}")}".Trim(),
+                    InteractionDate = DateTime.UtcNow
+                });
+            }
+        }
+        else if (prevPrimaryId.HasValue)
+        {
+            enquiry.AutoAssignmentReason = null;
+            _context.InteractionHistories.Add(new InteractionHistory
+            {
+                EnquiryId = enquiry.Id,
+                InteractionType = "Counselor Assignment",
+                Disposition = "Unassigned",
+                Notes = "Primary Counselor manually unassigned.",
+                InteractionDate = DateTime.UtcNow
+            });
+        }
+
+        // 2. Process Co-Counselor Assignment
+        var prevCoId = enquiry.CoCounselorId;
+        enquiry.CoCounselorId = dto.CoCounselorId;
+        if (dto.CoCounselorId.HasValue)
+        {
+            counselorDict.TryGetValue(dto.CoCounselorId.Value, out var coName);
+            coName ??= "Admissions Staff";
+
+            enquiry.CoCounselorReason = !string.IsNullOrWhiteSpace(dto.CoCounselorReason)
+                ? dto.CoCounselorReason
+                : $"Manually designated Co-Counselor: {coName}";
+
+            if (prevCoId != dto.CoCounselorId)
+            {
+                _context.InteractionHistories.Add(new InteractionHistory
+                {
+                    EnquiryId = enquiry.Id,
+                    InteractionType = "Co-Counselor Assignment",
+                    Disposition = "Manual Assigned",
+                    Notes = $"Co-Counselor manually designated as {coName}. {(string.IsNullOrWhiteSpace(dto.CoCounselorReason) ? "" : $"Reason: {dto.CoCounselorReason}")}".Trim(),
+                    InteractionDate = DateTime.UtcNow
+                });
+            }
+        }
+        else if (prevCoId.HasValue)
+        {
+            enquiry.CoCounselorReason = null;
+            _context.InteractionHistories.Add(new InteractionHistory
+            {
+                EnquiryId = enquiry.Id,
+                InteractionType = "Co-Counselor Assignment",
+                Disposition = "Unassigned",
+                Notes = "Co-Counselor manually unassigned.",
+                InteractionDate = DateTime.UtcNow
+            });
+        }
+
+        await _context.SaveChangesAsync();
+
+        string? assignedCounselorName = enquiry.AssignedToId.HasValue && counselorDict.TryGetValue(enquiry.AssignedToId.Value, out var cName) ? cName : null;
+        string? coCounselorName = enquiry.CoCounselorId.HasValue && counselorDict.TryGetValue(enquiry.CoCounselorId.Value, out var coNameRes) ? coNameRes : null;
+
+        return Ok(MapToDto(enquiry, assignedCounselorName, coCounselorName));
+    }
+
+    [HttpPut("{id}")]
+    public async Task<IActionResult> UpdateEnquiry(Guid id, [FromBody] UpdateEnquiryDto dto)
+    {
+        var enquiry = await _context.Enquiries
+            .Include(e => e.Interactions)
+            .Include(e => e.LeadSource)
+            .Include(e => e.Campaign)
+            .FirstOrDefaultAsync(e => e.Id == id);
+
+        if (enquiry == null) return NotFound();
+        if (!CanAccessEnquiry(enquiry)) return Forbid();
+
+        if (!string.IsNullOrWhiteSpace(dto.FirstName)) enquiry.FirstName = dto.FirstName.Trim();
+        if (!string.IsNullOrWhiteSpace(dto.LastName)) enquiry.LastName = dto.LastName.Trim();
+        if (!string.IsNullOrWhiteSpace(dto.Email)) enquiry.Email = dto.Email.Trim();
+        if (!string.IsNullOrWhiteSpace(dto.Phone)) enquiry.Phone = dto.Phone.Trim();
+        if (!string.IsNullOrWhiteSpace(dto.GradeInterested)) enquiry.GradeInterested = dto.GradeInterested.Trim();
+        if (dto.CampusId.HasValue) enquiry.CampusId = dto.CampusId;
+        if (dto.LeadSourceId.HasValue) enquiry.LeadSourceId = dto.LeadSourceId;
+        if (dto.CampaignId.HasValue) enquiry.CampaignId = dto.CampaignId;
+        if (dto.PreferredLanguage != null) enquiry.PreferredLanguage = dto.PreferredLanguage;
+        if (dto.Region != null) enquiry.Region = dto.Region;
+        if (dto.Religion != null) enquiry.Religion = dto.Religion;
+        if (!string.IsNullOrWhiteSpace(dto.Status)) enquiry.Status = dto.Status.Trim();
+
+        var counselorDict = await _context.CounselorProfiles
+            .ToDictionaryAsync(c => c.UserId, c => c.CounselorName);
+
+        if (dto.AssignedToId != enquiry.AssignedToId)
+        {
+            var prevAssignedId = enquiry.AssignedToId;
+            enquiry.AssignedToId = dto.AssignedToId;
+            if (dto.AssignedToId.HasValue)
+            {
+                enquiry.AssignedAt = DateTime.UtcNow;
+                counselorDict.TryGetValue(dto.AssignedToId.Value, out var primaryName);
+                primaryName ??= "Admissions Counselor";
+                enquiry.AutoAssignmentReason = !string.IsNullOrWhiteSpace(dto.AssignmentNotes) ? dto.AssignmentNotes : $"Manually assigned to {primaryName} by Admissions Staff.";
+                _context.InteractionHistories.Add(new InteractionHistory
+                {
+                    EnquiryId = enquiry.Id,
+                    InteractionType = "Counselor Assignment",
+                    Disposition = "Manual Assigned",
+                    Notes = $"Primary Counselor updated to {primaryName}.",
+                    InteractionDate = DateTime.UtcNow
+                });
+            }
+            else if (prevAssignedId.HasValue)
+            {
+                enquiry.AutoAssignmentReason = null;
+                _context.InteractionHistories.Add(new InteractionHistory
+                {
+                    EnquiryId = enquiry.Id,
+                    InteractionType = "Counselor Assignment",
+                    Disposition = "Unassigned",
+                    Notes = "Primary Counselor unassigned.",
+                    InteractionDate = DateTime.UtcNow
+                });
+            }
+        }
+
+        if (dto.CoCounselorId != enquiry.CoCounselorId)
+        {
+            var prevCoId = enquiry.CoCounselorId;
+            enquiry.CoCounselorId = dto.CoCounselorId;
+            if (dto.CoCounselorId.HasValue)
+            {
+                counselorDict.TryGetValue(dto.CoCounselorId.Value, out var coName);
+                coName ??= "Admissions Staff";
+                enquiry.CoCounselorReason = !string.IsNullOrWhiteSpace(dto.CoCounselorReason) ? dto.CoCounselorReason : $"Manually designated Co-Counselor: {coName}";
+                _context.InteractionHistories.Add(new InteractionHistory
+                {
+                    EnquiryId = enquiry.Id,
+                    InteractionType = "Co-Counselor Assignment",
+                    Disposition = "Manual Assigned",
+                    Notes = $"Co-Counselor updated to {coName}.",
+                    InteractionDate = DateTime.UtcNow
+                });
+            }
+            else if (prevCoId.HasValue)
+            {
+                enquiry.CoCounselorReason = null;
+                _context.InteractionHistories.Add(new InteractionHistory
+                {
+                    EnquiryId = enquiry.Id,
+                    InteractionType = "Co-Counselor Assignment",
+                    Disposition = "Unassigned",
+                    Notes = "Co-Counselor unassigned.",
+                    InteractionDate = DateTime.UtcNow
+                });
+            }
+        }
+
+        await _context.SaveChangesAsync();
+
+        string? assignedCounselorName = enquiry.AssignedToId.HasValue && counselorDict.TryGetValue(enquiry.AssignedToId.Value, out var cName) ? cName : null;
+        string? coCounselorName = enquiry.CoCounselorId.HasValue && counselorDict.TryGetValue(enquiry.CoCounselorId.Value, out var coNameRes) ? coNameRes : null;
+
+        return Ok(MapToDto(enquiry, assignedCounselorName, coCounselorName));
     }
 
     [HttpPost("{id}/auto-assign")]
@@ -844,7 +1140,7 @@ public class LeadsController : ControllerBase
             Email = enquiry.Email,
             Phone = enquiry.Phone,
             GradeInterested = enquiry.GradeInterested,
-            InstitutionId = enquiry.InstitutionId,
+            InstitutionId = enquiry.InstitutionId ?? Guid.Parse("fc49d553-b44f-4c4c-96ad-4bf599016c01"),
             CampusId = enquiry.CampusId,
             LeadSourceId = enquiry.LeadSourceId,
             LeadSourceName = enquiry.LeadSource?.Name,

@@ -107,7 +107,7 @@ export default function Dashboard() {
       api.get<CalendarActivity[]>(`/api/leads/activities${instQuery}`).catch(() => ({ data: [] })),
       api.get<Enquiry[]>(`/api/leads${instQuery}`).catch(() => ({ data: [] })),
       api.get<Application[]>(`/api/applications${instQuery}`).catch(() => ({ data: [] })),
-      api.get<Enrollment[]>('/api/enrollments').catch(() => ({ data: [] }))
+      api.get<Enrollment[]>(`/api/enrollments${instQuery}`).catch(() => ({ data: [] }))
     ])
       .then(([dashRes, calRes, leadsRes, appsRes, enrRes]) => {
         setActivities(dashRes.data.recentActivities);

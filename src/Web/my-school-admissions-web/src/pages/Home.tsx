@@ -1124,7 +1124,7 @@ export default function Home() {
               © 2026 MySchoolAdmissions. All rights reserved.
             </div>
             <div className="flex space-x-4">
-              <span>Privacy Policy</span>
+              <Link to="/privacy-policy" className="hover:text-white transition">Privacy Policy</Link>
               <span>•</span>
               <span>Terms of Service</span>
               <span>•</span>

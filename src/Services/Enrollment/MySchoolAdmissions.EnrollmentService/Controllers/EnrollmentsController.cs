@@ -40,24 +40,28 @@ public class EnrollmentsController : ControllerBase
         catch { return (false, null); }
     }
 
-    private Guid? GetSelectedInstitutionId()
+    private Guid? GetSelectedInstitutionId(Guid? queryInstId = null)
     {
         var (isSuperAdmin, userInstitutionId) = GetUserContext();
         if (!isSuperAdmin) return userInstitutionId;
-        if (Request.Headers.TryGetValue("X-Tenant-Id", out var tenant) && Guid.TryParse(tenant, out var tenantId)) return tenantId;
-        if (Request.Headers.TryGetValue("X-Institution-Id", out var institution) && Guid.TryParse(institution, out var institutionId)) return institutionId;
+        if (queryInstId.HasValue && queryInstId.Value != Guid.Empty) return queryInstId.Value;
+        if (Request.Headers.TryGetValue("X-Tenant-Id", out var tenant) && Guid.TryParse(tenant, out var tenantId) && tenantId != Guid.Empty) return tenantId;
+        if (Request.Headers.TryGetValue("X-Institution-Id", out var institution) && Guid.TryParse(institution, out var institutionId) && institutionId != Guid.Empty) return institutionId;
         return null;
     }
 
     private bool CanAccess(Enrollment enrollment)
     {
         var selectedInstitutionId = GetSelectedInstitutionId();
-        return selectedInstitutionId.HasValue && enrollment.InstitutionId == selectedInstitutionId.Value ||
-               !selectedInstitutionId.HasValue && GetUserContext().isSuperAdmin;
+        if (!selectedInstitutionId.HasValue) return GetUserContext().isSuperAdmin;
+        var disId = Guid.Parse("fc49d553-b44f-4c4c-96ad-4bf599016c01");
+        if (selectedInstitutionId.Value == disId)
+            return enrollment.InstitutionId == selectedInstitutionId.Value || enrollment.InstitutionId == null;
+        return enrollment.InstitutionId == selectedInstitutionId.Value;
     }
 
     [HttpGet]
-    public async Task<IActionResult> GetEnrollments()
+    public async Task<IActionResult> GetEnrollments([FromQuery] Guid? institutionId = null)
     {
         var count = await _context.Enrollments.CountAsync();
         if (count == 0)
@@ -66,9 +70,21 @@ public class EnrollmentsController : ControllerBase
         }
 
         var query = _context.Enrollments.AsQueryable();
-        var selectedInstitutionId = GetSelectedInstitutionId();
+        var selectedInstitutionId = GetSelectedInstitutionId(institutionId);
         if (!selectedInstitutionId.HasValue && !GetUserContext().isSuperAdmin) return Ok(Array.Empty<EnrollmentDto>());
-        if (selectedInstitutionId.HasValue) query = query.Where(e => e.InstitutionId == selectedInstitutionId.Value);
+        
+        if (selectedInstitutionId.HasValue)
+        {
+            var disId = Guid.Parse("fc49d553-b44f-4c4c-96ad-4bf599016c01");
+            if (selectedInstitutionId.Value == disId)
+            {
+                query = query.Where(e => e.InstitutionId == selectedInstitutionId.Value || e.InstitutionId == null);
+            }
+            else
+            {
+                query = query.Where(e => e.InstitutionId == selectedInstitutionId.Value);
+            }
+        }
 
         var enrollments = await query
             .Include(e => e.Payments)
@@ -719,14 +735,24 @@ public class EnrollmentsController : ControllerBase
     }
 
     [HttpGet("concessions/pending")]
-    public async Task<IActionResult> GetPendingConcessions()
+    public async Task<IActionResult> GetPendingConcessions([FromQuery] Guid? institutionId = null)
     {
-        var selectedInstitutionId = GetSelectedInstitutionId();
+        var selectedInstitutionId = GetSelectedInstitutionId(institutionId);
         if (!selectedInstitutionId.HasValue && !GetUserContext().isSuperAdmin) return Forbid();
 
         var enrollmentQuery = _context.Enrollments.AsQueryable();
         if (selectedInstitutionId.HasValue)
-            enrollmentQuery = enrollmentQuery.Where(e => e.InstitutionId == selectedInstitutionId.Value);
+        {
+            var disId = Guid.Parse("fc49d553-b44f-4c4c-96ad-4bf599016c01");
+            if (selectedInstitutionId.Value == disId)
+            {
+                enrollmentQuery = enrollmentQuery.Where(e => e.InstitutionId == selectedInstitutionId.Value || e.InstitutionId == null);
+            }
+            else
+            {
+                enrollmentQuery = enrollmentQuery.Where(e => e.InstitutionId == selectedInstitutionId.Value);
+            }
+        }
         var enrollmentIds = await enrollmentQuery.Select(e => e.Id).ToListAsync();
 
         var concessions = await _context.FeeConcessions
@@ -778,12 +804,14 @@ public class EnrollmentsController : ControllerBase
             new { Name = "Meera Nair", Grade = "Grade 8", Status = "Confirmed" }
         };
 
+        var disId = Guid.Parse("fc49d553-b44f-4c4c-96ad-4bf599016c01");
         foreach (var s in sampleStudents)
         {
             var enr = new Enrollment
             {
                 Id = Guid.NewGuid(),
                 ApplicationId = Guid.NewGuid(),
+                InstitutionId = disId,
                 StudentName = s.Name,
                 Grade = s.Grade,
                 Status = s.Status,

@@ -286,6 +286,7 @@ export const CampaignsTable: React.FC<Props> = ({
                           <QrCode className="w-4 h-4" />
                         </button>
 
+
                         {/* Pause / Resume */}
                         {camp.status === 'Active' ? (
                           <button

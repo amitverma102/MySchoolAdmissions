@@ -96,15 +96,25 @@ export default function Institutions() {
 
   useEffect(() => {
     fetchInstitutions();
+    const handleTenantChanged = () => {
+      fetchInstitutions();
+    };
+    window.addEventListener('tenantChanged', handleTenantChanged);
+    return () => window.removeEventListener('tenantChanged', handleTenantChanged);
   }, []);
 
   const fetchInstitutions = async () => {
     try {
       const response = await api.get('/api/institutions');
       const userInstitutionId = localStorage.getItem('userInstitutionId');
-      const visibleInstitutions = isSuperAdmin || !userInstitutionId
-        ? response.data
-        : response.data.filter((institution: Institution) => institution.id === userInstitutionId);
+      const selectedInstId = localStorage.getItem('selectedInstitutionId');
+
+      let visibleInstitutions: Institution[] = response.data || [];
+      if (!isSuperAdmin && userInstitutionId) {
+        visibleInstitutions = visibleInstitutions.filter((institution: Institution) => institution.id === userInstitutionId);
+      } else if (isSuperAdmin && selectedInstId && selectedInstId !== 'all') {
+        visibleInstitutions = visibleInstitutions.filter((institution: Institution) => institution.id.toLowerCase() === selectedInstId.toLowerCase());
+      }
       setInstitutions(visibleInstitutions);
     } catch (error) {
       console.error('Failed to fetch institutions', error);
@@ -113,13 +123,18 @@ export default function Institutions() {
 
   const fetchUsers = async (institutionId: string) => {
     try {
-      const response = await api.get('/api/users');
-      const users: User[] = response.data;
-      const userInstitutionId = localStorage.getItem('userInstitutionId');
-      const visibleUsers = isSuperAdmin || !userInstitutionId
-        ? users
-        : users.filter(u => u.institutionId === userInstitutionId);
-      setInstUsers(visibleUsers.filter(u => u.institutionId === institutionId));
+      const params = institutionId ? { institutionId } : {};
+      const response = await api.get('/api/users', { params });
+      const users: User[] = response.data || [];
+      const disId = 'fc49d553-b44f-4c4c-96ad-4bf599016c01';
+      const visibleUsers = users.filter(u => {
+        if (!institutionId) return true;
+        if (institutionId.toLowerCase() === disId.toLowerCase()) {
+          return !u.institutionId || u.institutionId.toLowerCase() === disId.toLowerCase();
+        }
+        return u.institutionId?.toLowerCase() === institutionId.toLowerCase();
+      });
+      setInstUsers(visibleUsers);
     } catch (error) {
       console.error('Failed to fetch users', error);
     }

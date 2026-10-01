@@ -809,17 +809,18 @@ public class ActivitiesController : ControllerBase
         if (requestedSlot.StartTime < DateTime.UtcNow || bookedCount >= requestedSlot.Capacity)
             return Conflict(new { message = "That tour slot is no longer available. Please choose another slot." });
 
-        // 1. Find existing or create new Lead
-        var lead = await _context.Enquiries
-            .FirstOrDefaultAsync(e => 
-                e.InstitutionId == requestedSlot.InstitutionId &&
-                ((!string.IsNullOrEmpty(normalizedEmail) && e.Email.ToLower() == normalizedEmail) ||
-                (!string.IsNullOrEmpty(normalizedPhone) && e.Phone == normalizedPhone)));
-
         var studentFullName = string.IsNullOrWhiteSpace(dto.StudentName) ? dto.ParentName : dto.StudentName.Trim();
         var nameParts = studentFullName.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
         var studentFirst = nameParts.Length > 0 ? nameParts[0] : studentFullName;
         var studentLast = nameParts.Length > 1 ? nameParts[1] : string.Empty;
+
+        // 1. Find existing or create new Lead for this specific student
+        var lead = await _context.Enquiries
+            .FirstOrDefaultAsync(e => 
+                e.InstitutionId == requestedSlot.InstitutionId &&
+                e.FirstName.ToLower() == studentFirst.ToLower() &&
+                ((!string.IsNullOrEmpty(normalizedEmail) && e.Email.ToLower() == normalizedEmail) ||
+                (!string.IsNullOrEmpty(normalizedPhone) && e.Phone == normalizedPhone)));
 
         if (lead == null)
         {
@@ -919,10 +920,17 @@ public class ActivitiesController : ControllerBase
 
         var confirmationCode = $"TOUR-{DateTime.UtcNow:yyMM}-{Random.Shared.Next(1000, 9999)}";
 
+        var cleanGrade = (dto.GradeInterested ?? string.Empty).Trim();
+        if (cleanGrade.StartsWith("Grade", StringComparison.OrdinalIgnoreCase))
+        {
+            cleanGrade = cleanGrade.Substring(5).Trim();
+        }
+        var gradeDisplay = string.IsNullOrWhiteSpace(cleanGrade) ? "General" : $"Grade {cleanGrade}";
+
         var activity = new AdmissionActivity
         {
             EnquiryId = lead.Id,
-            Title = $"Campus Tour - {studentFullName} (Grade {dto.GradeInterested})",
+            Title = $"Campus Tour - {studentFullName} ({gradeDisplay})",
             ActivityType = "CampusTour",
             Priority = "High",
             Description = $"Self-booked campus tour by {dto.ParentName} ({dto.Phone}). Attendees: {dto.NumberOfAttendees}. Notes: {dto.Notes ?? "None"}. Code: {confirmationCode}",

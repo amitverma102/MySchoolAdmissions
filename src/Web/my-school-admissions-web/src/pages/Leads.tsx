@@ -3,11 +3,11 @@ import {
   Plus, MessageSquare, Phone, Send, Sparkles, Flame, CheckCircle, Clock, 
   ExternalLink, RefreshCw, BookOpen, Calendar, Search, Filter, 
   ArrowUpDown, ArrowUp, ArrowDown, X, Users, User, AlertCircle, Building2, UserCheck,
-  Zap, Mic, Cloud, Volume2, Download, Megaphone, QrCode
+  Zap, Mic, Cloud, Volume2, Download, Megaphone, QrCode, UserPlus, Edit3, Check
 } from 'lucide-react';
 import { jwtDecode } from 'jwt-decode';
 import api from '../lib/api';
-import { type Enquiry, type CommunicationLog, type CommunicationTemplate, type CounselorSkillProfile } from '../types';
+import { type Enquiry, type CommunicationLog, type CommunicationTemplate, type CounselorSkillProfile, type CounselorMatchCandidate } from '../types';
 import CallRecorderModal from '../components/telephony/CallRecorderModal';
 
 interface CustomJwtPayload {
@@ -73,6 +73,68 @@ export default function Leads() {
   const [autoAssigningCoCounselorId, setAutoAssigningCoCounselorId] = useState<string | null>(null);
   const [batchAssigning, setBatchAssigning] = useState(false);
   const [batchAssignResult, setBatchAssignResult] = useState<string | null>(null);
+
+  // Manual Counselor & Co-Counselor Assignment Modal State
+  const [isAssignCounselorModalOpen, setIsAssignCounselorModalOpen] = useState(false);
+  const [assignModalLead, setAssignModalLead] = useState<Enquiry | null>(null);
+  const [modalPrimaryCounselorId, setModalPrimaryCounselorId] = useState('');
+  const [modalCoCounselorId, setModalCoCounselorId] = useState('');
+  const [modalAssignmentNotes, setModalAssignmentNotes] = useState('');
+  const [modalCoCounselorReason, setModalCoCounselorReason] = useState('');
+  const [savingAssignment, setSavingAssignment] = useState(false);
+  const [assignmentSuccessToast, setAssignmentSuccessToast] = useState<string | null>(null);
+  const [aiMatchCandidates, setAiMatchCandidates] = useState<CounselorMatchCandidate[]>([]);
+  const [loadingAiCandidates, setLoadingAiCandidates] = useState(false);
+  const [newLeadInstitutionId, setNewLeadInstitutionId] = useState('');
+  const [institutionsList, setInstitutionsList] = useState<{ id: string; name: string }[]>([]);
+
+  // Helper to restrict counselors strictly to the lead's institute
+  const getCounselorsForLead = (lead?: Enquiry | null, customInstId?: string | null): CounselorSkillProfile[] => {
+    const disId = 'fc49d553-b44f-4c4c-96ad-4bf599016c01';
+    const svisId = 'a48d7782-dda9-42ad-b21a-046d517f1ce5';
+    let targetInstId: string;
+
+    if (customInstId) {
+      targetInstId = customInstId;
+    } else if (lead && (lead.institutionId || (lead as any).InstitutionId)) {
+      targetInstId = lead.institutionId || (lead as any).InstitutionId;
+    } else {
+      // When creating a new lead or with no specific lead:
+      const stored = localStorage.getItem('selectedInstitutionId');
+      if (stored && stored !== 'all') {
+        targetInstId = stored;
+      } else if (newLeadInstitutionId) {
+        targetInstId = newLeadInstitutionId;
+      } else {
+        targetInstId = disId;
+      }
+    }
+
+    const tInst = (targetInstId || disId).toLowerCase();
+
+    return counselorProfiles.filter(p => {
+      let pInst = (p.institutionId || (p as any).InstitutionId || '').toLowerCase();
+
+      // If missing, attempt domain inference
+      if (!pInst && p.email) {
+        const e = p.email.toLowerCase();
+        if (e.includes('@svis') || e.includes('svis')) pInst = svisId.toLowerCase();
+        else if (e.includes('@dis') || e.includes('dis')) pInst = disId.toLowerCase();
+      }
+
+      // Strictly must belong to the target institution - never leak across institutions
+      if (!pInst || pInst !== tInst) {
+        return false;
+      }
+
+      // Inactive counselors filtered out unless already assigned to this lead
+      if (!p.isActive && p.userId !== lead?.assignedToId && p.userId !== lead?.coCounselorId) {
+        return false;
+      }
+
+      return true;
+    });
+  };
 
   // Form State (Call / Interaction Logging)
   const [isCallModalOpen, setIsCallModalOpen] = useState(false);
@@ -387,14 +449,100 @@ export default function Leads() {
     const instId = localStorage.getItem('selectedInstitutionId') || 'all';
     const instQuery = instId && instId !== 'all' ? `?institutionId=${instId}` : '';
     try {
-      const [leadsRes, actsRes, profilesRes] = await Promise.all([
+      const [leadsRes, actsRes, profilesRes, usersRes, instsRes] = await Promise.all([
         api.get<Enquiry[]>(`/api/leads${instQuery}`),
         api.get<ActivityItem[]>(`/api/leads/activities${instQuery}`).catch(() => ({ data: [] })),
-        api.get<CounselorSkillProfile[]>('/api/counselors/profiles').catch(() => ({ data: [] }))
+        api.get<CounselorSkillProfile[]>('/api/counselors/profiles').catch(() => ({ data: [] })),
+        api.get<any[]>('/api/users').catch(() => ({ data: [] })),
+        api.get<{ id: string; name: string }[]>('/api/institutions').catch(() => ({ data: [] }))
       ]);
       setLeads(leadsRes.data || []);
       setActivities(actsRes.data || []);
-      setCounselorProfiles(profilesRes.data || []);
+
+      const institutions = instsRes.data || [];
+      setInstitutionsList(institutions);
+      if (institutions.length > 0) {
+        setNewLeadInstitutionId(prev => prev || (instId && instId !== 'all' ? instId : institutions[0].id));
+      }
+
+      const disId = 'fc49d553-b44f-4c4c-96ad-4bf599016c01';
+      const svisId = 'a48d7782-dda9-42ad-b21a-046d517f1ce5';
+
+      const profileMap = new Map<string, CounselorSkillProfile>();
+      (profilesRes.data || []).forEach(p => {
+        const uId = (p.userId || p.id || '').toString().toLowerCase();
+        if (uId) {
+          let instId = p.institutionId || (p as any).InstitutionId || null;
+          if (!instId && p.email) {
+            const e = p.email.toLowerCase();
+            if (e.includes('@svis') || e.includes('svis')) instId = svisId;
+            else if (e.includes('@dis') || e.includes('dis')) instId = disId;
+          }
+          profileMap.set(uId, { ...p, institutionId: instId || undefined });
+        }
+      });
+
+      // Build user map from IdentityService
+      const userMap = new Map<string, any>();
+      (usersRes.data || []).forEach((u: any) => {
+        const uId = (u.id || '').toString().toLowerCase();
+        if (uId) userMap.set(uId, u);
+      });
+
+      // Synchronize existing profiles with IdentityService user institution data
+      profileMap.forEach((p, uId) => {
+        const u = userMap.get(uId);
+        if (u) {
+          const uInstId = u.institutionId || u.InstitutionId || null;
+          if (uInstId && (!p.institutionId || p.institutionId !== uInstId)) {
+            p.institutionId = uInstId;
+          }
+          if (u.campusId && !p.campusId) {
+            p.campusId = u.campusId;
+          }
+        }
+      });
+
+      // Merge additional users with counselor / admissions / staff roles (excluding pure SuperAdmins)
+      (usersRes.data || []).forEach((u: any) => {
+        const uId = (u.id || '').toString().toLowerCase();
+        const roles = (u.roles || (u.role ? [u.role] : [])).map((r: string) => r.toLowerCase());
+        
+        // Exclude global superadmin user without specific counselor role
+        const isPureSuperAdmin = roles.includes('superadmin') && !roles.some((r: string) => r.includes('counsel') || r.includes('couns'));
+        if (isPureSuperAdmin) return;
+
+        const isCounselor = roles.some((r: string) =>
+          r.includes('counsel') || r.includes('couns') || r.includes('staff') || r.includes('admissions')
+        );
+
+        if (uId && isCounselor && !profileMap.has(uId)) {
+          let uInstId = u.institutionId || u.InstitutionId || null;
+          if (!uInstId && u.email) {
+            const e = u.email.toLowerCase();
+            if (e.includes('@svis') || e.includes('svis')) uInstId = svisId;
+            else if (e.includes('@dis') || e.includes('dis')) uInstId = disId;
+          }
+          profileMap.set(uId, {
+            id: u.id,
+            userId: u.id,
+            counselorName: `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email || 'Counselor',
+            email: u.email || '',
+            institutionId: uInstId || undefined,
+            languagesKnown: [],
+            handledClasses: [],
+            regions: [],
+            religions: [],
+            dailyLeadCapacity: 20,
+            maxActiveLeads: 50,
+            isActive: u.isActive !== false,
+            assignedCountToday: 0,
+            currentActiveLeads: 0
+          });
+        }
+      });
+
+      setCounselorProfiles(Array.from(profileMap.values()));
     } catch (error) {
       console.error('Error fetching leads and activities:', error);
     } finally {
@@ -435,7 +583,8 @@ export default function Leads() {
   const handleCreateLead = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const currentInstId = localStorage.getItem('selectedInstitutionId') || 'fc49d553-b44f-4c4c-96ad-4bf599016c01';
+      const storedInst = localStorage.getItem('selectedInstitutionId');
+      const currentInstId = (storedInst && storedInst !== 'all') ? storedInst : (newLeadInstitutionId || 'fc49d553-b44f-4c4c-96ad-4bf599016c01');
       const newLead: Enquiry = {
         firstName,
         lastName,
@@ -523,49 +672,146 @@ export default function Leads() {
     }
   };
 
+  const openAssignModal = async (lead: Enquiry) => {
+    const activeStored = localStorage.getItem('selectedInstitutionId');
+    const resolvedLead: Enquiry = {
+      ...lead,
+      institutionId: lead.institutionId || (lead as any).InstitutionId || ((activeStored && activeStored !== 'all') ? activeStored : 'fc49d553-b44f-4c4c-96ad-4bf599016c01')
+    };
+    setAssignModalLead(resolvedLead);
+    setModalPrimaryCounselorId(resolvedLead.assignedToId || '');
+    setModalCoCounselorId(resolvedLead.coCounselorId || '');
+    setModalAssignmentNotes(resolvedLead.autoAssignmentReason || '');
+    setModalCoCounselorReason(resolvedLead.coCounselorReason || '');
+    setIsAssignCounselorModalOpen(true);
+
+    // Fetch AI match recommendations for this lead in the background
+    setLoadingAiCandidates(true);
+    try {
+      const targetInstId = resolvedLead.institutionId;
+      const res = await api.post<CounselorMatchCandidate[]>('/api/counselors/match-simulator', {
+        gradeInterested: resolvedLead.gradeInterested,
+        preferredLanguage: resolvedLead.preferredLanguage,
+        region: resolvedLead.region,
+        religion: resolvedLead.religion,
+        institutionId: targetInstId,
+        campusId: resolvedLead.campusId
+      });
+      setAiMatchCandidates(res.data || []);
+    } catch (err) {
+      console.error('Failed to load match simulator for modal:', err);
+      setAiMatchCandidates([]);
+    } finally {
+      setLoadingAiCandidates(false);
+    }
+  };
+
+  const handleSaveCounselorAssignment = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!assignModalLead || !assignModalLead.id) return;
+    setSavingAssignment(true);
+    try {
+      const res = await api.put<Enquiry>(`/api/leads/${assignModalLead.id}/counselors`, {
+        assignedToId: modalPrimaryCounselorId || null,
+        coCounselorId: modalCoCounselorId || null,
+        assignmentNotes: modalAssignmentNotes || null,
+        coCounselorReason: modalCoCounselorReason || null
+      });
+
+      const updatedLead = res.data;
+      if (!updatedLead.institutionId && assignModalLead?.institutionId) {
+        updatedLead.institutionId = assignModalLead.institutionId;
+      }
+      setLeads(prev => prev.map(l => l.id === assignModalLead.id ? { ...l, ...updatedLead } : l));
+      if (selectedLead && selectedLead.id === assignModalLead.id) {
+        setSelectedLead(prev => prev ? { ...prev, ...updatedLead } : null);
+      }
+
+      setAssignmentSuccessToast(
+        `Counselor team updated for ${updatedLead.firstName} ${updatedLead.lastName}!`
+      );
+      setTimeout(() => setAssignmentSuccessToast(null), 5000);
+      setIsAssignCounselorModalOpen(false);
+      fetchLeadsAndActivities();
+    } catch (error: any) {
+      console.error('Error saving counselor assignment:', error);
+      const msg = error?.response?.data?.message || 'Failed to update counselor assignment. Please try again.';
+      alert(msg);
+    } finally {
+      setSavingAssignment(false);
+    }
+  };
+
   const handleAssignToMe = async (leadId: string) => {
     try {
       const myId = loggedInUser.id || "99999999-9999-9999-9999-999999999999";
-      await api.put(`/api/leads/${leadId}/assign`, `"${myId}"`, {
-        headers: { 'Content-Type': 'application/json' }
+      const targetLead = leads.find(l => l.id === leadId) || selectedLead;
+      const res = await api.put<Enquiry>(`/api/leads/${leadId}/counselors`, {
+        assignedToId: myId,
+        coCounselorId: targetLead?.coCounselorId || null,
+        assignmentNotes: "Assigned to self by Counselor.",
+        coCounselorReason: targetLead?.coCounselorReason || null
       });
+      const updated = res.data;
+      setLeads(prev => prev.map(l => l.id === leadId ? { ...l, ...updated } : l));
       if (selectedLead && selectedLead.id === leadId) {
-        const response = await api.get<Enquiry>(`/api/leads/${leadId}`);
-        setSelectedLead(response.data);
+        setSelectedLead(updated);
       }
+      setAssignmentSuccessToast(`Assigned to yourself!`);
+      setTimeout(() => setAssignmentSuccessToast(null), 4000);
       fetchLeadsAndActivities();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error assigning lead:', error);
+      const msg = error?.response?.data?.message || 'Error assigning lead to yourself.';
+      alert(msg);
     }
   };
 
   const handleAssignPrimary = async (leadId: string, counselorId: string | null) => {
     try {
-      await api.put(`/api/leads/${leadId}/assign`, counselorId ? `"${counselorId}"` : 'null', {
-        headers: { 'Content-Type': 'application/json' }
+      const targetLead = leads.find(l => l.id === leadId) || selectedLead;
+      const res = await api.put<Enquiry>(`/api/leads/${leadId}/counselors`, {
+        assignedToId: counselorId || null,
+        coCounselorId: targetLead?.coCounselorId || null,
+        assignmentNotes: counselorId ? "Manually assigned primary counselor." : null,
+        coCounselorReason: targetLead?.coCounselorReason || null
       });
+      const updated = res.data;
+      setLeads(prev => prev.map(l => l.id === leadId ? { ...l, ...updated } : l));
       if (selectedLead && selectedLead.id === leadId) {
-        const response = await api.get<Enquiry>(`/api/leads/${leadId}`);
-        setSelectedLead(response.data);
+        setSelectedLead(updated);
       }
+      setAssignmentSuccessToast(`Primary counselor updated!`);
+      setTimeout(() => setAssignmentSuccessToast(null), 4000);
       fetchLeadsAndActivities();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error setting primary counselor:', error);
+      const msg = error?.response?.data?.message || 'Error setting primary counselor.';
+      alert(msg);
     }
   };
 
   const handleAssignCoCounselor = async (leadId: string, coId: string | null) => {
     try {
-      await api.put(`/api/leads/${leadId}/co-counselor`, coId ? `"${coId}"` : 'null', {
-        headers: { 'Content-Type': 'application/json' }
+      const targetLead = leads.find(l => l.id === leadId) || selectedLead;
+      const res = await api.put<Enquiry>(`/api/leads/${leadId}/counselors`, {
+        assignedToId: targetLead?.assignedToId || null,
+        coCounselorId: coId || null,
+        assignmentNotes: targetLead?.autoAssignmentReason || null,
+        coCounselorReason: coId ? "Manually designated co-counselor." : null
       });
+      const updated = res.data;
+      setLeads(prev => prev.map(l => l.id === leadId ? { ...l, ...updated } : l));
       if (selectedLead && selectedLead.id === leadId) {
-        const response = await api.get<Enquiry>(`/api/leads/${leadId}`);
-        setSelectedLead(response.data);
+        setSelectedLead(updated);
       }
+      setAssignmentSuccessToast(`Co-counselor updated!`);
+      setTimeout(() => setAssignmentSuccessToast(null), 4000);
       fetchLeadsAndActivities();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error setting co-counselor:', error);
+      const msg = error?.response?.data?.message || 'Error setting co-counselor.';
+      alert(msg);
     }
   };
 
@@ -697,7 +943,11 @@ export default function Leads() {
       setAiInsight(null);
       setCommHistory([]);
       const response = await api.get<Enquiry>(`/api/leads/${lead.id}`);
-      setSelectedLead(response.data);
+      const leadData = response.data;
+      if (!leadData.institutionId) {
+        leadData.institutionId = lead.institutionId || (lead as any).InstitutionId;
+      }
+      setSelectedLead(leadData);
       
       // Fetch AI Insight
       setLoadingInsight(true);
@@ -1303,6 +1553,19 @@ export default function Leads() {
                                 </span>
                               )
                             )}
+
+                            {/* Direct edit button right next to counselor pills */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openAssignModal(lead);
+                              }}
+                              className="inline-flex items-center text-[10px] font-semibold text-purple-700 hover:text-purple-900 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-1.5 py-0.5 rounded transition shadow-2xs"
+                              title="Manually assign or edit Counselor / Co-Counselor"
+                            >
+                              <Edit3 className="w-2.5 h-2.5 mr-1 text-purple-600" />
+                              {lead.assignedToId ? 'Edit Team' : 'Assign'}
+                            </button>
                           </div>
 
                           {lead.autoAssignmentScore !== undefined && lead.autoAssignmentScore !== null && (
@@ -1316,29 +1579,42 @@ export default function Leads() {
                           )}
 
                           {!lead.assignedToId && (
-                            <div className="flex items-center gap-1 mt-0.5">
+                            <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openAssignModal(lead);
+                                }}
+                                className="inline-flex items-center font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-2 py-1 rounded-md transition shadow-2xs text-[11px]"
+                                title="Manually choose primary counselor and co-counselor"
+                              >
+                                <UserPlus className="w-3 h-3 mr-1 text-purple-600" />
+                                Assign Manually
+                              </button>
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   if (lead.id) handleAutoAssignSingle(lead.id);
-                               }}
+                                }}
                                 disabled={autoAssigningLeadId === lead.id}
-                                className="inline-flex items-center font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-2 py-1 rounded-md transition shadow-2xs"
+                                className="inline-flex items-center font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2 py-1 rounded-md transition shadow-2xs text-[11px]"
                                 title="Auto-assign best counselor team via AI"
                               >
-                                <Sparkles className={`w-3 h-3 mr-1 text-purple-600 ${autoAssigningLeadId === lead.id ? 'animate-spin' : ''}`} />
-                                Auto-Assign AI
+                                <Sparkles className={`w-3 h-3 mr-1 text-indigo-600 ${autoAssigningLeadId === lead.id ? 'animate-spin' : ''}`} />
+                                Auto AI
                               </button>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (lead.id) handleAssignToMe(lead.id);
-                                }}
-                                className="inline-flex items-center font-medium text-gray-500 bg-gray-50 hover:bg-blue-50 hover:text-blue-700 border border-dashed border-gray-300 px-1.5 py-1 rounded-md transition"
-                                title="Assign this enquiry to yourself"
-                              >
-                                Me
-                              </button>
+                              {loggedInUser.id && getCounselorsForLead(lead).some(p => p.userId === loggedInUser.id) && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (lead.id) handleAssignToMe(lead.id);
+                                  }}
+                                  className="inline-flex items-center font-medium text-gray-500 bg-gray-50 hover:bg-blue-50 hover:text-blue-700 border border-dashed border-gray-300 px-1.5 py-1 rounded-md transition text-[11px]"
+                                  title="Assign this enquiry to yourself"
+                                >
+                                  Me
+                                </button>
+                              )}
                             </div>
                           )}
                         </div>
@@ -1382,6 +1658,14 @@ export default function Leads() {
                           >
                             <Send className="w-3 h-3 mr-1 text-emerald-600" />
                             Brochure
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); openAssignModal(lead); }}
+                            className="inline-flex items-center text-purple-700 bg-purple-50 hover:bg-purple-100 font-semibold text-xs border border-purple-200 px-2.5 py-1 rounded transition"
+                            title="Assign or edit Counselor & Co-Counselor"
+                          >
+                            <UserPlus className="w-3.5 h-3.5 mr-1 text-purple-600" />
+                            Assign
                           </button>
                           <button
                             onClick={(e) => { e.stopPropagation(); openDetails(lead); }}
@@ -1429,9 +1713,19 @@ export default function Leads() {
                     <p className="text-xs text-gray-500 mt-0.5">{selectedLead.email} • {selectedLead.phone} • Grade: {selectedLead.gradeInterested}</p>
                   </div>
                 </div>
-                <button onClick={() => setSelectedLead(null)} className="text-gray-400 hover:text-gray-600 p-1">
-                  ✕
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => openAssignModal(selectedLead)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg transition"
+                    title="Edit Counselor and Co-Counselor Assignment"
+                  >
+                    <UserPlus className="w-3.5 h-3.5 text-purple-600" />
+                    Assign Counselors
+                  </button>
+                  <button onClick={() => setSelectedLead(null)} className="text-gray-400 hover:text-gray-600 p-1">
+                    ✕
+                  </button>
+                </div>
               </div>
 
               {/* Attribution & Campaign Source Banner */}
@@ -1568,17 +1862,25 @@ export default function Leads() {
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                    <button
+                      onClick={() => openAssignModal(selectedLead)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white text-xs font-bold rounded-lg shadow-xs transition"
+                      title="Open full manual assignment and AI advisor"
+                    >
+                      <UserPlus className="w-3.5 h-3.5" />
+                      Manage Counselors
+                    </button>
                     <button
                       onClick={() => selectedLead.id && handleAutoAssignSingle(selectedLead.id)}
                       disabled={autoAssigningLeadId === selectedLead.id}
-                      className="inline-flex items-center px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg shadow-xs transition"
+                      className="inline-flex items-center px-3 py-1.5 bg-white border border-purple-200 hover:bg-purple-50 text-purple-700 text-xs font-bold rounded-lg shadow-xs transition"
                       title="Re-evaluate and pair primary & co-counselor using Artificial Intelligence"
                     >
                       <Sparkles className={`w-3.5 h-3.5 mr-1.5 ${autoAssigningLeadId === selectedLead.id ? 'animate-spin' : ''}`} />
                       {selectedLead.assignedToId ? 'Re-Score Team with AI' : 'Auto-Assign Team with AI'}
                     </button>
-                    {!selectedLead.assignedToId && (
+                    {!selectedLead.assignedToId && loggedInUser.id && getCounselorsForLead(selectedLead).some(p => p.userId === loggedInUser.id) && (
                       <button
                         onClick={() => selectedLead.id && handleAssignToMe(selectedLead.id)}
                         className="inline-flex items-center px-3 py-1.5 bg-white border border-gray-300 text-gray-700 hover:bg-gray-100 text-xs font-semibold rounded-lg transition"
@@ -1610,7 +1912,7 @@ export default function Leads() {
                       className="w-full text-xs p-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-purple-500 font-medium"
                     >
                       <option value="">Unassigned</option>
-                      {counselorProfiles.map(p => (
+                      {getCounselorsForLead(selectedLead).map(p => (
                         <option key={p.userId} value={p.userId}>
                           {p.counselorName} ({p.currentActiveLeads}/{p.maxActiveLeads} active)
                         </option>
@@ -1641,7 +1943,7 @@ export default function Leads() {
                       className="w-full text-xs p-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-teal-500 font-medium"
                     >
                       <option value="">None (Single Counselor)</option>
-                      {counselorProfiles
+                      {getCounselorsForLead(selectedLead)
                         .filter(p => p.userId !== selectedLead.assignedToId)
                         .map(p => (
                           <option key={p.userId} value={p.userId}>
@@ -2129,6 +2431,28 @@ export default function Leads() {
             <div className="relative inline-block align-bottom bg-white rounded-2xl px-6 pt-5 pb-6 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
               <h3 className="text-lg font-bold text-gray-900 mb-4">Create New Enquiry</h3>
               <form onSubmit={handleCreateLead} className="space-y-4 text-xs">
+                {/* School / Institution Selection (Displayed in Global View) */}
+                {(!localStorage.getItem('selectedInstitutionId') || localStorage.getItem('selectedInstitutionId') === 'all') && institutionsList.length > 0 && (
+                  <div>
+                    <label className="block font-semibold text-gray-700 mb-1">Target School / Institution *</label>
+                    <select
+                      value={newLeadInstitutionId}
+                      onChange={e => {
+                        setNewLeadInstitutionId(e.target.value);
+                        setAssignedToId('');
+                        setCoCounselorId('');
+                      }}
+                      className="p-2 w-full border border-purple-300 bg-purple-50/50 rounded-lg text-xs font-semibold text-purple-900 focus:ring-2 focus:ring-purple-500"
+                    >
+                      {institutionsList.map(inst => (
+                        <option key={inst.id} value={inst.id}>
+                          {inst.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block font-semibold text-gray-700 mb-1">First Name</label>
@@ -2228,7 +2552,7 @@ export default function Leads() {
                         className="p-2 w-full bg-white border border-gray-200 rounded-lg text-xs"
                       >
                         <option value="">Auto-Assign with AI (Recommended)</option>
-                        {counselorProfiles.map(p => (
+                        {getCounselorsForLead(null, newLeadInstitutionId).map(p => (
                           <option key={p.userId} value={p.userId}>
                             {p.counselorName}
                           </option>
@@ -2244,7 +2568,7 @@ export default function Leads() {
                         className="p-2 w-full bg-white border border-gray-200 rounded-lg text-xs"
                       >
                         <option value="">Auto-Assign with AI / None</option>
-                        {counselorProfiles
+                        {getCounselorsForLead(null, newLeadInstitutionId)
                           .filter(p => p.userId !== assignedToId)
                           .map(p => (
                             <option key={p.userId} value={p.userId}>
@@ -2288,6 +2612,348 @@ export default function Leads() {
             }
           }}
         />
+      )}
+
+      {/* Manual Counselor & Co-Counselor Assignment Modal */}
+      {isAssignCounselorModalOpen && assignModalLead && (() => {
+        const leadCounselors = getCounselorsForLead(assignModalLead);
+        const filteredAiCandidates = aiMatchCandidates.filter(c => leadCounselors.some(lc => lc.userId === c.userId));
+
+        return (
+          <div className="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="assign-modal-title" role="dialog" aria-modal="true">
+            <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+              <div 
+                className="fixed inset-0 bg-gray-900/60 backdrop-blur-xs transition-opacity" 
+                onClick={() => setIsAssignCounselorModalOpen(false)}
+              ></div>
+              <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+
+              <div className="relative inline-block align-bottom bg-white rounded-2xl text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl sm:w-full border border-gray-100">
+                {/* Modal Header */}
+                <div className="px-6 py-5 bg-gradient-to-r from-purple-900 via-indigo-900 to-blue-900 text-white flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 rounded-xl bg-white/10 backdrop-blur-md border border-white/20 text-purple-200">
+                      <UserPlus className="w-6 h-6 text-purple-300" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                        Assign / Edit Counselors
+                      </h3>
+                      <p className="text-xs text-purple-200 mt-0.5">
+                        Designate Primary Counselor, Co-Counselor, or apply AI-guided synergy pairing.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsAssignCounselorModalOpen(false)}
+                    className="text-purple-200 hover:text-white transition p-1 rounded-lg hover:bg-white/10"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Form Content */}
+                <form onSubmit={handleSaveCounselorAssignment}>
+                  <div className="p-6 space-y-5 max-h-[75vh] overflow-y-auto">
+                    {/* Lead Summary Header Card */}
+                    <div className="p-3.5 bg-gradient-to-r from-purple-50 via-indigo-50/60 to-blue-50/60 rounded-xl border border-purple-100/80 flex items-center justify-between flex-wrap gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 rounded-full bg-purple-600 text-white flex items-center justify-center font-bold text-sm shadow-sm">
+                          {(assignModalLead.firstName || '?')[0]}{(assignModalLead.lastName || '')[0] || ''}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-gray-900 text-sm">
+                              {assignModalLead.firstName} {assignModalLead.lastName}
+                            </span>
+                            <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-purple-100 text-purple-800 border border-purple-200">
+                              {assignModalLead.gradeInterested}
+                            </span>
+                            <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                              {assignModalLead.status}
+                            </span>
+                          </div>
+                          <div className="text-xs text-gray-500 flex items-center gap-2 mt-0.5 flex-wrap">
+                            <span>{assignModalLead.email}</span>
+                            <span>•</span>
+                            <span>{assignModalLead.phone}</span>
+                            {assignModalLead.preferredLanguage && (
+                              <>
+                                <span>•</span>
+                                <span className="text-purple-700 font-medium">Lang: {assignModalLead.preferredLanguage}</span>
+                              </>
+                            )}
+                            {assignModalLead.region && (
+                              <>
+                                <span>•</span>
+                                <span className="text-indigo-700 font-medium">Region: {assignModalLead.region}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Primary Counselor Selector */}
+                    <div className="p-4 bg-white rounded-xl border border-gray-200 shadow-2xs hover:border-purple-300 transition-colors">
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="text-xs font-bold text-gray-900 uppercase tracking-wider flex items-center gap-1.5">
+                          <User className="w-4 h-4 text-purple-600" />
+                          Primary Counselor (Lead Owner)
+                        </label>
+                        {loggedInUser.id && leadCounselors.some(p => p.userId === loggedInUser.id) && (
+                          <button
+                            type="button"
+                            onClick={() => setModalPrimaryCounselorId(loggedInUser.id)}
+                            className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded border border-blue-200 transition"
+                          >
+                            Assign to Myself
+                          </button>
+                        )}
+                      </div>
+                      <select
+                        value={modalPrimaryCounselorId}
+                        onChange={(e) => setModalPrimaryCounselorId(e.target.value)}
+                        className="w-full text-xs p-2.5 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-purple-500 font-medium text-gray-900"
+                      >
+                        <option value="">-- Unassigned (No Primary Counselor) --</option>
+                        {leadCounselors.map(p => (
+                          <option key={p.userId} value={p.userId}>
+                            {p.counselorName} • {p.currentActiveLeads}/{p.maxActiveLeads} active leads {p.userId === loggedInUser.id ? ' (You)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-[11px] text-gray-500 mt-1.5">
+                        Main point of contact responsible for consultation calls, parent engagement, and pipeline progression.
+                      </p>
+                    </div>
+
+                    {/* Co-Counselor Selector */}
+                    <div className="p-4 bg-white rounded-xl border border-gray-200 shadow-2xs hover:border-teal-300 transition-colors">
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="text-xs font-bold text-teal-950 uppercase tracking-wider flex items-center gap-1.5">
+                          <Users className="w-4 h-4 text-teal-600" />
+                          Co-Counselor (Dual-Coverage Partner)
+                        </label>
+                        <div className="flex items-center gap-1.5">
+                          {filteredAiCandidates.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const recommended = filteredAiCandidates.find(c => c.userId !== modalPrimaryCounselorId);
+                                if (recommended) {
+                                  setModalCoCounselorId(recommended.userId);
+                                  setModalCoCounselorReason(recommended.coCounselorSynergy || `AI synergy match: ${recommended.counselorName} (${recommended.totalScore}% match)`);
+                                }
+                              }}
+                              className="text-[11px] font-bold text-teal-700 hover:text-teal-800 bg-teal-50 hover:bg-teal-100 px-2 py-0.5 rounded border border-teal-200 transition flex items-center gap-1"
+                            >
+                              <Sparkles className="w-3 h-3 text-teal-600" />
+                              Auto-Pick Best Match
+                            </button>
+                          )}
+                          {modalCoCounselorId && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setModalCoCounselorId('');
+                                setModalCoCounselorReason('');
+                              }}
+                              className="text-[11px] font-medium text-gray-500 hover:text-rose-600 bg-gray-50 px-2 py-0.5 rounded border border-gray-200 transition"
+                            >
+                              Clear Co-Counselor
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <select
+                        value={modalCoCounselorId}
+                        onChange={(e) => {
+                          setModalCoCounselorId(e.target.value);
+                          if (!e.target.value) setModalCoCounselorReason('');
+                        }}
+                        className="w-full text-xs p-2.5 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-teal-500 font-medium text-gray-900"
+                      >
+                        <option value="">-- None (Single Counselor Model) --</option>
+                        {leadCounselors
+                          .filter(p => p.userId !== modalPrimaryCounselorId)
+                          .map(p => (
+                            <option key={p.userId} value={p.userId}>
+                              {p.counselorName} • {p.currentActiveLeads}/{p.maxActiveLeads} active leads {p.userId === loggedInUser.id ? ' (You)' : ''}
+                            </option>
+                          ))}
+                      </select>
+                      <p className="text-[11px] text-gray-500 mt-1.5">
+                        Collaborates with the primary counselor, covers absence periods, and provides specialized grade or regional language assistance.
+                      </p>
+                    </div>
+
+                    {/* Notes & Synergy Reasons */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-bold text-gray-700 uppercase tracking-wider mb-1">
+                          Primary Assignment Notes (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Assigned by Admissions Head for VIP visit"
+                          value={modalAssignmentNotes}
+                          onChange={(e) => setModalAssignmentNotes(e.target.value)}
+                          className="w-full text-xs p-2.5 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-purple-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-teal-800 uppercase tracking-wider mb-1">
+                          Co-Counselor Synergy Rationale (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Bilingual Hindi assistance & senior grade specialist"
+                          value={modalCoCounselorReason}
+                          onChange={(e) => setModalCoCounselorReason(e.target.value)}
+                          className="w-full text-xs p-2.5 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-teal-500"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Interactive AI Match Advisor */}
+                    <div className="p-3.5 bg-gradient-to-r from-purple-50/70 via-indigo-50/60 to-blue-50/60 rounded-xl border border-indigo-100">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-1.5">
+                          <Sparkles className="w-4 h-4 text-purple-600" />
+                          <span className="text-xs font-bold text-purple-950 uppercase tracking-wider">
+                            AI Compatibility Advisor
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-purple-700">
+                          {loadingAiCandidates ? 'Calculating live scores...' : `${filteredAiCandidates.length} eligible candidates`}
+                        </span>
+                      </div>
+
+                      {loadingAiCandidates ? (
+                        <div className="py-3 flex items-center justify-center text-xs text-purple-700 gap-2">
+                          <Sparkles className="w-4 h-4 animate-spin text-purple-600" />
+                          Analyzing candidate criteria with counselor skill profiles...
+                        </div>
+                      ) : filteredAiCandidates.length > 0 ? (
+                        <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                          {filteredAiCandidates.slice(0, 4).map((c) => (
+                            <div 
+                              key={c.userId} 
+                              className="p-2 bg-white rounded-lg border border-purple-100 flex items-center justify-between text-xs hover:border-purple-300 transition"
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-gray-900">{c.counselorName}</span>
+                                <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                  {c.totalScore}% Match
+                                </span>
+                                <span className="text-[11px] text-gray-500">
+                                  ({c.activeLeads}/{c.dailyCapacity} active)
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setModalPrimaryCounselorId(c.userId)}
+                                  className={`px-2 py-0.5 rounded text-[10px] font-bold transition ${
+                                    modalPrimaryCounselorId === c.userId
+                                      ? 'bg-purple-600 text-white'
+                                      : 'bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200'
+                                  }`}
+                                >
+                                  {modalPrimaryCounselorId === c.userId ? '✓ Primary' : 'Set Primary'}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={modalPrimaryCounselorId === c.userId}
+                                  onClick={() => {
+                                    setModalCoCounselorId(c.userId);
+                                    setModalCoCounselorReason(c.coCounselorSynergy || `AI synergy candidate (${c.totalScore}% match)`);
+                                  }}
+                                  className={`px-2 py-0.5 rounded text-[10px] font-bold transition ${
+                                    modalCoCounselorId === c.userId
+                                      ? 'bg-teal-600 text-white'
+                                      : 'bg-teal-50 text-teal-700 hover:bg-teal-100 border border-teal-200 disabled:opacity-40'
+                                  }`}
+                                >
+                                  {modalCoCounselorId === c.userId ? '✓ Co' : 'Set Co'}
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-gray-500 italic py-1">
+                          No specific AI match recommendations found for this lead's criteria.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Modal Footer */}
+                  <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setModalPrimaryCounselorId('');
+                        setModalCoCounselorId('');
+                        setModalAssignmentNotes('');
+                        setModalCoCounselorReason('');
+                      }}
+                      className="text-xs font-semibold text-gray-500 hover:text-rose-600 transition"
+                    >
+                      Clear All Assignments
+                    </button>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsAssignCounselorModalOpen(false)}
+                        className="px-4 py-2 border border-gray-300 rounded-lg text-xs font-semibold text-gray-700 hover:bg-white transition"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={savingAssignment}
+                        className="px-5 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-lg text-xs font-bold shadow-sm flex items-center gap-1.5 transition disabled:opacity-50"
+                      >
+                        {savingAssignment ? (
+                          <>
+                            <Sparkles className="w-3.5 h-3.5 animate-spin" />
+                            Saving Team...
+                          </>
+                        ) : (
+                          <>
+                            <Check className="w-3.5 h-3.5" />
+                            Save Assignment
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Assignment Success Toast */}
+      {assignmentSuccessToast && (
+        <div className="fixed bottom-6 right-6 z-50 bg-gray-900 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 border border-gray-700 animate-slide-up">
+          <div className="h-7 w-7 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+            <CheckCircle className="w-4 h-4" />
+          </div>
+          <span className="text-xs font-semibold">{assignmentSuccessToast}</span>
+          <button
+            onClick={() => setAssignmentSuccessToast(null)}
+            className="text-gray-400 hover:text-white p-1 rounded"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
       )}
     </div>
   );

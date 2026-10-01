@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { jwtDecode } from 'jwt-decode';
 import { 
   BarChart3, 
   Megaphone, 
@@ -43,9 +44,26 @@ import { CampaignCopilotDrawer } from '../components/campaign/CampaignCopilotDra
 import { CampaignQrCodeModal } from '../components/campaign/CampaignQrCodeModal';
 import { CampaignDiagnosisModal } from '../components/campaign/CampaignDiagnosisModal';
 import { CampaignAutopilotSettings } from '../components/campaign/CampaignAutopilotSettings';
+import { AdPlatformConnectionsPanel } from '../components/campaign/AdPlatformConnectionsPanel';
+import { GeneralAdsManager } from '../components/campaign/GeneralAdsManager';
+
+interface CampaignJwtPayload {
+  'http://schemas.microsoft.com/ws/2008/06/identity/claims/role'?: string | string[];
+  role?: string | string[];
+}
 
 export default function Campaigns() {
   const [activeTab, setActiveTab] = useState<string>('overview');
+  let currentRoles: string[] = [];
+  const currentToken = localStorage.getItem('token');
+  if (currentToken) {
+    try {
+      const decoded = jwtDecode<CampaignJwtPayload>(currentToken);
+      const claim = decoded['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'] || decoded.role;
+      currentRoles = Array.isArray(claim) ? claim : typeof claim === 'string' ? [claim] : [];
+    } catch { currentRoles = []; }
+  }
+  const isSuperAdmin = currentRoles.includes('SuperAdmin');
 
   // Core Datasets
   const [summary, setSummary] = useState<CampaignDashboardSummary | null>(null);
@@ -298,6 +316,8 @@ export default function Campaigns() {
   const tabs = [
     { id: 'overview', label: 'Overview & Funnel', icon: BarChart3 },
     { id: 'campaigns', label: 'All Campaigns', icon: Megaphone, count: campaigns.length },
+    { id: 'integrations', label: 'Ad Accounts & Integrations', icon: Radio },
+    ...(isSuperAdmin ? [{ id: 'general-ads', label: 'General Ads', icon: Megaphone }] : []),
     { id: 'recommendations', label: 'AI Recommendations', icon: Sparkles, badge: recommendations.filter((r: CampaignRecommendation) => r.status === 'Pending').length },
     { id: 'ideas', label: 'Campaign Ideas', icon: Lightbulb },
     { id: 'calendar', label: 'Calendar & Timeline', icon: Calendar },
@@ -446,6 +466,15 @@ export default function Campaigns() {
           />
         )}
 
+        {activeTab === 'integrations' && (
+          <AdPlatformConnectionsPanel
+            institutionId={activeInstitutionId}
+            institutionName={activeInstitutionName}
+          />
+        )}
+
+        {activeTab === 'general-ads' && isSuperAdmin && <GeneralAdsManager />}
+
         {activeTab === 'recommendations' && (
           <AICampaignRecommendations
             recommendations={recommendations}
@@ -567,6 +596,7 @@ export default function Campaigns() {
         onClose={() => setIsDiagnosisOpen(false)}
         campaign={diagnosingCampaign}
       />
+
 
       {/* Standard Custom Campaign Creation Modal */}
       {isManualCreateOpen && (

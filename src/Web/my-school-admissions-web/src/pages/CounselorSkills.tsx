@@ -25,6 +25,8 @@ export default function CounselorSkills() {
     userId: string;
     counselorName: string;
     email: string;
+    institutionId?: string;
+    campusId?: string;
     languagesKnown: string[];
     handledClasses: string[];
     regions: string[];
@@ -36,6 +38,8 @@ export default function CounselorSkills() {
     userId: '',
     counselorName: '',
     email: '',
+    institutionId: undefined,
+    campusId: undefined,
     languagesKnown: [],
     handledClasses: [],
     regions: [],
@@ -121,6 +125,8 @@ export default function CounselorSkills() {
       userId: profile.userId,
       counselorName: profile.counselorName,
       email: profile.email,
+      institutionId: profile.institutionId,
+      campusId: profile.campusId,
       languagesKnown: [...profile.languagesKnown],
       handledClasses: [...profile.handledClasses],
       regions: [...profile.regions],
@@ -169,7 +175,12 @@ export default function CounselorSkills() {
   const runSimulation = async () => {
     setSimLoading(true);
     try {
-      const res = await api.post<CounselorMatchCandidate[]>('/api/counselors/match-simulator', simCriteria);
+      const currentInstId = localStorage.getItem('selectedInstitutionId');
+      const instId = (currentInstId && currentInstId !== 'all') ? currentInstId : 'fc49d553-b44f-4c4c-96ad-4bf599016c01';
+      const res = await api.post<CounselorMatchCandidate[]>('/api/counselors/match-simulator', {
+        ...simCriteria,
+        institutionId: instId
+      });
       setSimResults(res.data || []);
     } catch (err) {
       console.error('Failed to run match simulation', err);

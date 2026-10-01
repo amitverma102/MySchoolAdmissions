@@ -21,6 +21,7 @@ import DocumentRepository from './pages/DocumentRepository';
 import PublicPaymentCheckout from './pages/PublicPaymentCheckout';
 import PublicApply from './pages/PublicApply';
 import Reports from './pages/Reports';
+import PrivacyPolicy from './pages/PrivacyPolicy';
 import { jwtDecode } from 'jwt-decode';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -54,6 +55,7 @@ function App() {
       <Routes>
         {/* Public Routes */}
         <Route path="/" element={<Home />} />
+        <Route path="/privacy-policy" element={<PrivacyPolicy />} />
         <Route path="/apply" element={<PublicApply />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />

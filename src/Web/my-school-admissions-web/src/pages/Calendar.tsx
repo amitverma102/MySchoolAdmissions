@@ -41,6 +41,7 @@ interface LeadOption {
   phone: string;
   gradeInterested: string;
   status: string;
+  institutionId?: string;
 }
 
 interface UserOption {
@@ -193,6 +194,36 @@ export default function Calendar() {
   const [formAssignedTo, setFormAssignedTo] = useState('');
   const [formDescription, setFormDescription] = useState('');
 
+  // Restrict selectable counselors strictly to the institution to which the selected student/lead belongs
+  const counselorsForScheduleActivity = useMemo(() => {
+    const disId = 'fc49d553-b44f-4c4c-96ad-4bf599016c01';
+    if (!formEnquiryId) {
+      const stored = localStorage.getItem('selectedInstitutionId');
+      if (!stored || stored === 'all') return users;
+      return users.filter(u => {
+        const uInst = (u.institutionId || '').toLowerCase();
+        return stored.toLowerCase() === disId.toLowerCase()
+          ? (!uInst || uInst === disId.toLowerCase())
+          : (uInst === stored.toLowerCase());
+      });
+    }
+
+    const lead = leads.find(l => l.id === formEnquiryId);
+    const targetInstId = (lead?.institutionId || (lead as any)?.InstitutionId) || disId;
+    return users.filter(u => {
+      const uInst = (u.institutionId || '').toLowerCase();
+      return targetInstId.toLowerCase() === disId.toLowerCase()
+        ? (!uInst || uInst === disId.toLowerCase())
+        : (uInst === targetInstId.toLowerCase());
+    });
+  }, [formEnquiryId, leads, users]);
+
+  useEffect(() => {
+    if (formAssignedTo && !counselorsForScheduleActivity.some(u => u.id === formAssignedTo)) {
+      setFormAssignedTo('');
+    }
+  }, [counselorsForScheduleActivity, formAssignedTo]);
+
   // Outcome modal form
   const [outcomeDisposition, setOutcomeDisposition] = useState('Interested - Qualified');
   const [outcomeNotes, setOutcomeNotes] = useState('');
@@ -275,9 +306,19 @@ export default function Calendar() {
       setLeads(leadsRes.data || []);
 
       const userMap = new Map<string, UserOption>();
+      const disId = 'fc49d553-b44f-4c4c-96ad-4bf599016c01';
+      const matchesTenant = (inst?: string) => {
+        if (!instId || instId === 'all') return true;
+        const normalized = (inst || '').toLowerCase();
+        if (instId.toLowerCase() === disId) {
+          return !normalized || normalized === disId;
+        }
+        return normalized === instId.toLowerCase();
+      };
+
       (usersRes.data || []).forEach((u: any) => {
         const userInstitutionId = (u.institutionId || u.InstitutionId || '').toString();
-        if (u.id && (instId === 'all' || userInstitutionId.toLowerCase() === instId.toLowerCase())) {
+        if (u.id && matchesTenant(userInstitutionId)) {
           userMap.set(u.id.toLowerCase(), {
             id: u.id,
             firstName: u.firstName || '',
@@ -293,7 +334,7 @@ export default function Calendar() {
       (counselorsRes.data || []).forEach((c: any) => {
         const cId = (c.userId || c.id || '').toString();
         const counselorInstitutionId = (c.institutionId || c.InstitutionId || '').toString();
-        if (cId && (instId === 'all' || counselorInstitutionId.toLowerCase() === instId.toLowerCase()) && !userMap.has(cId.toLowerCase())) {
+        if (cId && matchesTenant(counselorInstitutionId) && !userMap.has(cId.toLowerCase())) {
           const names = (c.counselorName || 'Counselor').trim().split(' ');
           userMap.set(cId.toLowerCase(), {
             id: cId,
@@ -2068,16 +2109,16 @@ export default function Calendar() {
                   <label className="block text-slate-700 mb-1">Assign To Counselor</label>
                   <select
                     value={formAssignedTo}
-                    onChange={e => setFormAssignedTo(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
-                  >
-                    <option value="">-- Unassigned --</option>
-                    {users.map(u => (
-                      <option key={u.id} value={u.id}>
-                        {u.firstName} {u.lastName}
-                      </option>
-                    ))}
-                  </select>
+                      onChange={e => setFormAssignedTo(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                    >
+                      <option value="">-- Unassigned --</option>
+                      {counselorsForScheduleActivity.map(u => (
+                        <option key={u.id} value={u.id}>
+                          {u.firstName} {u.lastName}
+                        </option>
+                      ))}
+                    </select>
                 </div>
               </div>
 

@@ -235,19 +235,39 @@ export default function Enrollments() {
 
   useEffect(() => {
     fetchEnrollments();
+    const handleTenant = () => {
+      fetchEnrollments();
+    };
+    window.addEventListener('tenantChanged', handleTenant);
+    return () => window.removeEventListener('tenantChanged', handleTenant);
   }, []);
 
   const fetchEnrollments = async () => {
     try {
-      const response = await api.get<Enrollment[]>('/api/enrollments');
+      setLoading(true);
+      const selectedInstId = localStorage.getItem('selectedInstitutionId');
+      const instQuery = selectedInstId && selectedInstId !== 'all' ? `?institutionId=${selectedInstId}` : '';
+      const response = await api.get<Enrollment[]>(`/api/enrollments${instQuery}`);
+      const disId = 'fc49d553-b44f-4c4c-96ad-4bf599016c01';
       if (response.data && response.data.length > 0) {
         setEnrollments(response.data);
       } else {
-        setEnrollments(INITIAL_FALLBACK_ENROLLMENTS);
+        // Only use fallback data if no institution is selected or DIS is selected
+        if (!selectedInstId || selectedInstId === 'all' || selectedInstId.toLowerCase() === disId) {
+          setEnrollments(INITIAL_FALLBACK_ENROLLMENTS);
+        } else {
+          setEnrollments([]);
+        }
       }
     } catch (error) {
       console.warn('API unavailable or empty, initializing with fallback enrollments:', error);
-      setEnrollments(INITIAL_FALLBACK_ENROLLMENTS);
+      const selectedInstId = localStorage.getItem('selectedInstitutionId');
+      const disId = 'fc49d553-b44f-4c4c-96ad-4bf599016c01';
+      if (!selectedInstId || selectedInstId === 'all' || selectedInstId.toLowerCase() === disId) {
+        setEnrollments(INITIAL_FALLBACK_ENROLLMENTS);
+      } else {
+        setEnrollments([]);
+      }
     } finally {
       setLoading(false);
     }

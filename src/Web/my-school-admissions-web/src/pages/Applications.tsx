@@ -120,7 +120,7 @@ export default function Applications() {
     try {
       const [appsRes, enrRes] = await Promise.all([
         api.get<Application[]>(`/api/applications${instQuery}`),
-        api.get<Enrollment[]>('/api/enrollments').catch(() => ({ data: [] }))
+        api.get<Enrollment[]>(`/api/enrollments${instQuery}`).catch(() => ({ data: [] }))
       ]);
       setApplications(appsRes.data || []);
       setEnrollments(enrRes.data || []);

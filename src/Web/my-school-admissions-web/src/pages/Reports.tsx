@@ -37,11 +37,13 @@ export default function Reports() {
   const loadReport = useCallback(async () => {
     setLoading(true);
     setError('');
+    const instId = localStorage.getItem('selectedInstitutionId') || 'all';
+    const instQuery = instId && instId !== 'all' ? `?institutionId=${instId}` : '';
     try {
       const [leadsResponse, applicationsResponse, counselorsResponse] = await Promise.all([
-        api.get<Enquiry[]>('/api/leads'),
-        api.get<Application[]>('/api/applications'),
-        api.get<CounselorSkillProfile[]>('/api/counselors/profiles').catch(() => ({ data: [] as CounselorSkillProfile[] }))
+        api.get<Enquiry[]>(`/api/leads${instQuery}`),
+        api.get<Application[]>(`/api/applications${instQuery}`),
+        api.get<CounselorSkillProfile[]>(`/api/counselors/profiles${instQuery}`).catch(() => ({ data: [] as CounselorSkillProfile[] }))
       ]);
       setLeads(Array.isArray(leadsResponse.data) ? leadsResponse.data : []);
       setApplications(Array.isArray(applicationsResponse.data) ? applicationsResponse.data : []);

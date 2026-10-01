@@ -65,7 +65,17 @@ public class CampaignIntelligenceController : ControllerBase
             return Forbid();
 
         if (selectedInstitutionId.HasValue) 
-            query = query.Where(c => c.InstitutionId == selectedInstitutionId.Value);
+        {
+            var disId = MarketingDbSeeder.DisInstitutionId;
+            if (selectedInstitutionId.Value == disId)
+            {
+                query = query.Where(c => c.InstitutionId == selectedInstitutionId.Value || c.InstitutionId == null);
+            }
+            else
+            {
+                query = query.Where(c => c.InstitutionId == selectedInstitutionId.Value);
+            }
+        }
 
         if (!string.IsNullOrWhiteSpace(schoolName))
             query = query.Where(c => c.SchoolName.ToLower() == schoolName.ToLower());
