@@ -943,18 +943,80 @@ export default function Applications() {
                   <span>Program-Specific Dynamic Form Fields</span>
                   <span className="text-xs text-slate-500 font-normal">Custom Schema</span>
                 </h4>
-                {selectedApp.customFieldsJson ? (
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    {Object.entries(JSON.parse(selectedApp.customFieldsJson || '{}'))
-                      .filter(([key]) => key !== 'studentPhoto')
-                      .map(([key, val]) => (
-                        <div key={key} className="bg-white p-2.5 rounded-lg border border-slate-200">
-                          <span className="text-slate-400 capitalize block text-[10px] font-semibold">{key.replace(/([A-Z])/g, ' $1')}</span>
-                          <span className="font-bold text-slate-900">{String(val)}</span>
-                        </div>
-                      ))}
-                  </div>
-                ) : (
+                {selectedApp.customFieldsJson ? (() => {
+                  let parsed: Record<string, any> = {};
+                  try {
+                    parsed = JSON.parse(selectedApp.customFieldsJson || '{}');
+                  } catch {
+                    parsed = {};
+                  }
+                  const labelsMap: Record<string, string> = parsed._fieldLabels || {};
+                  const entries = Object.entries(parsed).filter(
+                    ([key]) => key !== 'studentPhoto' && key !== '_fieldLabels'
+                  );
+
+                  if (entries.length === 0) {
+                    return (
+                      <div className="text-xs text-slate-500 bg-white p-3 rounded-lg border border-slate-200">
+                        No custom questions answered yet.
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                      {entries.map(([key, val]) => {
+                        const displayLabel = labelsMap[key] || key.replace(/([A-Z])/g, ' $1');
+                        let displayVal = '';
+                        let isFile = false;
+                        let fileDownloadUrl = '';
+
+                        if (val && typeof val === 'object') {
+                          if (val.fileName) {
+                            isFile = true;
+                            displayVal = val.fileName;
+                            fileDownloadUrl = val.dataUrl || '';
+                          } else if (Array.isArray(val)) {
+                            displayVal = val.join(', ');
+                          } else {
+                            displayVal = JSON.stringify(val);
+                          }
+                        } else if (typeof val === 'boolean') {
+                          displayVal = val ? 'Yes' : 'No';
+                        } else {
+                          displayVal = String(val ?? '');
+                        }
+
+                        return (
+                          <div key={key} className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs hover:border-blue-200 transition">
+                            <span className="text-slate-500 font-semibold block text-[11px] mb-1 line-clamp-2">
+                              {displayLabel}
+                            </span>
+                            {isFile ? (
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className="font-bold text-slate-900 truncate">{displayVal}</span>
+                                {fileDownloadUrl && (
+                                  <a
+                                    href={fileDownloadUrl}
+                                    download={displayVal}
+                                    className="text-[10px] text-blue-600 hover:text-blue-800 font-bold underline shrink-0"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    View File
+                                  </a>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="font-bold text-slate-900 break-words text-xs leading-relaxed">
+                                {displayVal || '—'}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })() : (
                   <div className="text-xs text-slate-500 flex items-center justify-between bg-white p-3 rounded-lg border border-slate-200">
                     <span>No custom questions answered yet.</span>
                     <button

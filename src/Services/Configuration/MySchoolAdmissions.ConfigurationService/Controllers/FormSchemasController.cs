@@ -1,6 +1,14 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
 
 namespace MySchoolAdmissions.ConfigurationService.Controllers;
+
+public class FormFieldCondition
+{
+    public string DependsOn { get; set; } = string.Empty; // fieldName or system variable "grade"
+    public string Operator { get; set; } = "equals"; // equals, notEquals, greaterThan, lessThan, contains, isTruthy, isFalsy
+    public string Value { get; set; } = string.Empty;
+    public string Action { get; set; } = "show"; // show, hide
+}
 
 public class FormFieldDefinition
 {
@@ -13,6 +21,7 @@ public class FormFieldDefinition
     public string Placeholder { get; set; } = string.Empty;
     public string HelpText { get; set; } = string.Empty;
     public string Section { get; set; } = "Academic & Student Details"; // Academic, Parent, Documents, Health
+    public FormFieldCondition? Condition { get; set; }
 }
 
 public class FormSchemaDto
@@ -57,13 +66,20 @@ public class FormSchemasController : ControllerBase
                 {
                     Id = "fld-second-lang",
                     FieldName = "secondLanguage",
-                    Label = "Second Language Preference",
+                    Label = "Optional / Second Language Preference",
                     FieldType = "select",
                     Options = new List<string> { "Hindi", "French", "Sanskrit", "Spanish", "German" },
                     IsRequired = true,
                     Placeholder = "Choose language option",
-                    HelpText = "Language curriculum applicable from Grade 1 upwards.",
-                    Section = "Academic & Student Details"
+                    HelpText = "Language curriculum applicable from Grade 6 upwards (Grade > 5).",
+                    Section = "Academic & Student Details",
+                    Condition = new FormFieldCondition
+                    {
+                        DependsOn = "grade",
+                        Operator = "greaterThan",
+                        Value = "5",
+                        Action = "show"
+                    }
                 },
                 new()
                 {
@@ -75,6 +91,71 @@ public class FormSchemasController : ControllerBase
                     IsRequired = true,
                     HelpText = "Routes cover a 25km radius from campus.",
                     Section = "Logistics & Transport"
+                },
+                new()
+                {
+                    Id = "fld-bus-landmark",
+                    FieldName = "preferredBusRoute",
+                    Label = "Preferred Bus Route / Pickup Landmark",
+                    FieldType = "text",
+                    IsRequired = true,
+                    Placeholder = "e.g. Sector 21 Metro Gate 2 / Near Golf Course Road",
+                    HelpText = "Our transport coordinator will allocate the nearest stop point.",
+                    Section = "Logistics & Transport",
+                    Condition = new FormFieldCondition
+                    {
+                        DependsOn = "requiresTransport",
+                        Operator = "contains",
+                        Value = "Yes",
+                        Action = "show"
+                    }
+                },
+                new()
+                {
+                    Id = "fld-has-sibling",
+                    FieldName = "hasSiblingInSchool",
+                    Label = "Does the applicant have a sibling currently studying in our school?",
+                    FieldType = "radio",
+                    Options = new List<string> { "Yes, sibling currently enrolled", "No sibling in this school" },
+                    IsRequired = true,
+                    HelpText = "Enables sibling verification and fee concession processing.",
+                    Section = "Sibling & Concession Details"
+                },
+                new()
+                {
+                    Id = "fld-sibling-info",
+                    FieldName = "siblingDetails",
+                    Label = "Sibling Full Name, Admission ID & Current Grade",
+                    FieldType = "text",
+                    IsRequired = true,
+                    Placeholder = "e.g. Priyansh Sharma (Adm #DIS-2023-412, Grade 7-B)",
+                    HelpText = "Used by admissions office to link student records and verify sibling status.",
+                    Section = "Sibling & Concession Details",
+                    Condition = new FormFieldCondition
+                    {
+                        DependsOn = "hasSiblingInSchool",
+                        Operator = "equals",
+                        Value = "Yes, sibling currently enrolled",
+                        Action = "show"
+                    }
+                },
+                new()
+                {
+                    Id = "fld-sibling-discount",
+                    FieldName = "siblingDiscountOptIn",
+                    Label = "Apply for Sibling Concession (15% Tuition Fee Waiver)?",
+                    FieldType = "radio",
+                    Options = new List<string> { "Yes, apply for 15% sibling tuition waiver", "No, standard fee schedule" },
+                    IsRequired = true,
+                    HelpText = "Applicable upon successful verification of active sibling enrollment.",
+                    Section = "Sibling & Concession Details",
+                    Condition = new FormFieldCondition
+                    {
+                        DependsOn = "hasSiblingInSchool",
+                        Operator = "equals",
+                        Value = "Yes, sibling currently enrolled",
+                        Action = "show"
+                    }
                 },
                 new()
                 {
@@ -146,6 +227,28 @@ public class FormSchemasController : ControllerBase
                     Options = new List<string> { "Yes, enroll in integrated batch", "No, regular board classes only" },
                     IsRequired = true,
                     Section = "Specialization & Electives"
+                },
+                new()
+                {
+                    Id = "fld-coaching-track",
+                    FieldName = "coachingSpecialization",
+                    Label = "Integrated Competitive Exam Track",
+                    FieldType = "select",
+                    Options = new List<string> 
+                    { 
+                        "IIT-JEE Advanced Engineering Foundation", 
+                        "NEET-UG Medical Entrance Accelerator", 
+                        "SAT & AP Prep for Ivy League & Global Universities" 
+                    },
+                    IsRequired = true,
+                    Section = "Specialization & Electives",
+                    Condition = new FormFieldCondition
+                    {
+                        DependsOn = "integratedCoaching",
+                        Operator = "contains",
+                        Value = "Yes",
+                        Action = "show"
+                    }
                 }
             }
         }
@@ -162,14 +265,70 @@ public class FormSchemasController : ControllerBase
     [Microsoft.AspNetCore.Authorization.AllowAnonymous]
     public IActionResult GetSchemaForGrade(string grade)
     {
-        var specific = _schemas.FirstOrDefault(s => s.GradeApplicable.Equals(grade, StringComparison.OrdinalIgnoreCase));
-        if (specific != null)
+        var general = _schemas.FirstOrDefault(s => s.GradeApplicable.Equals("ALL", StringComparison.OrdinalIgnoreCase));
+        
+        var specific = _schemas.FirstOrDefault(s =>
+            !s.GradeApplicable.Equals("ALL", StringComparison.OrdinalIgnoreCase) && (
+                s.GradeApplicable.Equals(grade, StringComparison.OrdinalIgnoreCase) ||
+                grade.StartsWith(s.GradeApplicable, StringComparison.OrdinalIgnoreCase) ||
+                s.GradeApplicable.StartsWith(grade, StringComparison.OrdinalIgnoreCase)
+            ));
+
+        if (specific == null)
+        {
+            return Ok(general ?? _schemas.FirstOrDefault());
+        }
+
+        if (general == null)
         {
             return Ok(specific);
         }
 
-        var general = _schemas.FirstOrDefault(s => s.GradeApplicable == "ALL") ?? _schemas.FirstOrDefault();
-        return Ok(general);
+        // Merge general fields with specific fields without any duplicates
+        var mergedFields = new List<FormFieldDefinition>();
+        var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Add general fields first
+        foreach (var field in general.Fields)
+        {
+            var key = string.IsNullOrWhiteSpace(field.FieldName) ? field.Id : field.FieldName;
+            if (seenKeys.Add(key))
+            {
+                mergedFields.Add(field);
+            }
+        }
+
+        // Add or override with specific fields
+        foreach (var field in specific.Fields)
+        {
+            var key = string.IsNullOrWhiteSpace(field.FieldName) ? field.Id : field.FieldName;
+            if (seenKeys.Add(key))
+            {
+                mergedFields.Add(field);
+            }
+            else
+            {
+                var existingIdx = mergedFields.FindIndex(m => 
+                    (string.IsNullOrWhiteSpace(m.FieldName) ? m.Id : m.FieldName).Equals(key, StringComparison.OrdinalIgnoreCase));
+                if (existingIdx >= 0)
+                {
+                    mergedFields[existingIdx] = field;
+                }
+            }
+        }
+
+        var combinedSchema = new FormSchemaDto
+        {
+            Id = specific.Id,
+            FormTitle = specific.FormTitle,
+            GradeApplicable = grade,
+            Description = specific.Description,
+            IsActive = specific.IsActive,
+            UpdatedAt = specific.UpdatedAt > general.UpdatedAt ? specific.UpdatedAt : general.UpdatedAt,
+            Fields = mergedFields
+        };
+
+        return Ok(combinedSchema);
     }
 
     [HttpPost]

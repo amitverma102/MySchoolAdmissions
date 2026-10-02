@@ -22,6 +22,8 @@ interface NewApplicationModalProps {
   onSuccess: (newApp: Application) => void;
 }
 
+import { type FormField, evaluateCondition, isDuplicateField } from '../../lib/formConditionEvaluator';
+
 interface SchoolOption {
   id: string;
   name: string;
@@ -99,6 +101,12 @@ export default function NewApplicationModal({ isOpen, onClose, onSuccess }: NewA
   const [status, setStatus] = useState('Submitted');
   const [notes, setNotes] = useState('');
 
+  // Dynamic fields from Application Form Builder
+  const [dynamicFields, setDynamicFields] = useState<FormField[]>([]);
+  const [dynamicValues, setDynamicValues] = useState<Record<string, any>>({});
+  const [loadingSchema, setLoadingSchema] = useState(false);
+  const [schemaTitle, setSchemaTitle] = useState('');
+
   // Photograph state
   const [studentPhoto, setStudentPhoto] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
@@ -141,6 +149,81 @@ export default function NewApplicationModal({ isOpen, onClose, onSuccess }: NewA
         }
       });
   }, [isOpen]);
+
+  // Fetch dynamic form fields from Application Builder for the selected grade
+  useEffect(() => {
+    if (!isOpen) return;
+    let isMounted = true;
+    setLoadingSchema(true);
+
+    api.get(`/api/formschemas/${encodeURIComponent(gradeApplyingFor)}`)
+      .then(res => {
+        if (!isMounted) return;
+        const schema = res.data;
+        if (schema && Array.isArray(schema.fields)) {
+          setSchemaTitle(schema.formTitle || 'Application Builder Fields');
+          const nonDuplicates = schema.fields.filter((f: FormField) => !isDuplicateField(f));
+          setDynamicFields(nonDuplicates);
+        }
+      })
+      .catch(err => {
+        console.warn('Grade schema lookup failed, falling back to all schemas', err);
+        api.get('/api/formschemas')
+          .then(res => {
+            if (!isMounted) return;
+            if (Array.isArray(res.data) && res.data.length > 0) {
+              const general = res.data.find((s: any) => s.gradeApplicable === 'ALL') || res.data[0];
+              if (general && Array.isArray(general.fields)) {
+                setSchemaTitle(general.formTitle || 'Application Builder Fields');
+                const nonDuplicates = general.fields.filter((f: FormField) => !isDuplicateField(f));
+                setDynamicFields(nonDuplicates);
+              }
+            }
+          })
+          .catch(() => {});
+      })
+      .finally(() => {
+        if (isMounted) setLoadingSchema(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen, gradeApplyingFor]);
+
+  // Dynamic field value change handler
+  const handleDynamicChange = (fieldName: string, value: any) => {
+    setDynamicValues(prev => ({
+      ...prev,
+      [fieldName]: value
+    }));
+  };
+
+  // Dynamic file upload handler
+  const handleDynamicFileUpload = (fieldName: string, file: File | null) => {
+    if (!file) {
+      setDynamicValues(prev => {
+        const next = { ...prev };
+        delete next[fieldName];
+        return next;
+      });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setDynamicValues(prev => ({
+        ...prev,
+        [fieldName]: {
+          fileName: file.name,
+          fileSize: file.size,
+          fileType: file.type,
+          dataUrl: e.target?.result as string
+        }
+      }));
+    };
+    reader.readAsDataURL(file);
+  };
 
   // Update campus when institution changes
   const handleInstitutionChange = (instId: string) => {
@@ -232,9 +315,35 @@ export default function NewApplicationModal({ isOpen, onClose, onSuccess }: NewA
       return;
     }
 
+    // Validate required dynamic fields from Form Builder (only if condition is currently met)
+    for (const field of dynamicFields) {
+      const isVisible = evaluateCondition(field.condition, dynamicValues, gradeApplyingFor);
+      if (isVisible && field.isRequired) {
+        const val = dynamicValues[field.fieldName];
+        const isEmpty = val === undefined || val === null || val === '' || 
+          (Array.isArray(val) && val.length === 0) ||
+          (typeof val === 'object' && !val.fileName && !val.dataUrl);
+        if (isEmpty) {
+          setSubmitError(`"${field.label}" is required by the school application form.`);
+          return;
+        }
+      }
+    }
+
     setIsSubmitting(true);
 
     try {
+      const fieldLabelsMap: Record<string, string> = {};
+      const activeDynamicValues: Record<string, any> = {};
+
+      dynamicFields.forEach(f => {
+        const isVisible = evaluateCondition(f.condition, dynamicValues, gradeApplyingFor);
+        if (isVisible && dynamicValues[f.fieldName] !== undefined) {
+          activeDynamicValues[f.fieldName] = dynamicValues[f.fieldName];
+          fieldLabelsMap[f.fieldName] = f.label;
+        }
+      });
+
       const customFields = {
         studentPhoto: studentPhoto || undefined,
         gender,
@@ -245,7 +354,9 @@ export default function NewApplicationModal({ isOpen, onClose, onSuccess }: NewA
         contactEmail: contactEmail.trim() || undefined,
         relationship,
         previousSchool: previousSchool.trim() || undefined,
-        notes: notes.trim() || undefined
+        notes: notes.trim() || undefined,
+        ...activeDynamicValues,
+        _fieldLabels: fieldLabelsMap
       };
 
       const payload = {
@@ -285,6 +396,8 @@ export default function NewApplicationModal({ isOpen, onClose, onSuccess }: NewA
     setNotes('');
     setPreviousSchool('');
     setSubmitError(null);
+    setDynamicValues({});
+    setDynamicFields([]);
     onClose();
   };
 
@@ -662,6 +775,226 @@ export default function NewApplicationModal({ isOpen, onClose, onSuccess }: NewA
                   </div>
                 </div>
               </div>
+
+              {/* 6. Dynamic Program & Grade Specific Requirements (from Application Builder) */}
+              {(() => {
+                if (loadingSchema) {
+                  return (
+                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-center gap-2 text-xs text-slate-500">
+                      <div className="w-3.5 h-3.5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+                      <span>Loading program-specific requirements from Application Builder...</span>
+                    </div>
+                  );
+                }
+
+                const visibleDynamicFields = dynamicFields.filter(f => evaluateCondition(f.condition, dynamicValues, gradeApplyingFor));
+                if (visibleDynamicFields.length === 0) return null;
+
+                return (
+                  <div className="bg-gradient-to-br from-indigo-50/40 via-white to-blue-50/30 border border-indigo-100 rounded-xl p-4.5 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 pb-2 border-b border-indigo-100/70">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center shadow-xs">
+                          <Sparkles className="w-3.5 h-3.5" />
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+                            {schemaTitle || 'Program & Grade Specific Questions'}
+                          </h4>
+                          <p className="text-[11px] text-slate-500">
+                            Dynamic fields configured in Application Builder for <strong className="text-indigo-900 font-semibold">{gradeApplyingFor}</strong>
+                          </p>
+                        </div>
+                      </div>
+                      <span className="self-start sm:self-center text-[10px] bg-indigo-100 text-indigo-700 font-bold px-2.5 py-0.5 rounded-full border border-indigo-200">
+                        {visibleDynamicFields.length} Custom Field{visibleDynamicFields.length > 1 ? 's' : ''}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {visibleDynamicFields.map(field => {
+                        const isFullWidth = field.fieldType === 'textarea' || field.fieldType === 'radio' || (field.options && field.options.length > 3);
+                        return (
+                          <div key={field.id} className={isFullWidth ? 'sm:col-span-2' : 'sm:col-span-1'}>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="block text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                                <span>{field.label}</span>
+                                {field.isRequired && <span className="text-rose-500">*</span>}
+                                {field.condition && (
+                                  <span className="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1 py-0.2 rounded font-medium">
+                                    Flow Rule
+                                  </span>
+                                )}
+                              </label>
+                              {field.section && (
+                                <span className="text-[10px] text-slate-400 font-medium">
+                                  {field.section}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Field inputs by type */}
+                            {field.fieldType === 'text' && (
+                              <input
+                                type="text"
+                                value={dynamicValues[field.fieldName] || ''}
+                                onChange={e => handleDynamicChange(field.fieldName, e.target.value)}
+                                placeholder={field.placeholder || `Enter ${field.label}...`}
+                                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-white shadow-2xs"
+                              />
+                            )}
+
+                            {field.fieldType === 'number' && (
+                              <input
+                                type="number"
+                                step="any"
+                                value={dynamicValues[field.fieldName] ?? ''}
+                                onChange={e => handleDynamicChange(field.fieldName, e.target.value)}
+                                placeholder={field.placeholder || 'e.g. 85.5'}
+                                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-white shadow-2xs"
+                              />
+                            )}
+
+                            {field.fieldType === 'select' && (
+                              <select
+                                value={dynamicValues[field.fieldName] || ''}
+                                onChange={e => handleDynamicChange(field.fieldName, e.target.value)}
+                                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-white shadow-2xs"
+                              >
+                                <option value="">{field.placeholder || '— Please select an option —'}</option>
+                                {field.options?.map(opt => (
+                                  <option key={opt} value={opt}>{opt}</option>
+                                ))}
+                              </select>
+                            )}
+
+                            {field.fieldType === 'radio' && (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1">
+                                {field.options?.map(opt => {
+                                  const isChecked = dynamicValues[field.fieldName] === opt;
+                                  return (
+                                    <label
+                                      key={opt}
+                                      className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition text-xs ${
+                                        isChecked
+                                          ? 'bg-indigo-50/80 border-indigo-400 text-indigo-950 font-semibold shadow-xs'
+                                          : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
+                                      }`}
+                                    >
+                                      <input
+                                        type="radio"
+                                        name={`dyn-${field.fieldName}`}
+                                        value={opt}
+                                        checked={isChecked}
+                                        onChange={() => handleDynamicChange(field.fieldName, opt)}
+                                        className="mt-0.5 text-indigo-600 focus:ring-indigo-500 shrink-0"
+                                      />
+                                      <span className="leading-snug">{opt}</span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {field.fieldType === 'checkbox' && (
+                              field.options && field.options.length > 0 ? (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1">
+                                  {field.options.map(opt => {
+                                    const currentList: string[] = Array.isArray(dynamicValues[field.fieldName]) ? dynamicValues[field.fieldName] : [];
+                                    const isChecked = currentList.includes(opt);
+                                    return (
+                                      <label
+                                        key={opt}
+                                        className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition text-xs ${
+                                          isChecked
+                                            ? 'bg-indigo-50 border-indigo-400 text-indigo-900 font-semibold'
+                                            : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
+                                        }`}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={isChecked}
+                                          onChange={e => {
+                                            const next = e.target.checked
+                                              ? [...currentList, opt]
+                                              : currentList.filter(item => item !== opt);
+                                            handleDynamicChange(field.fieldName, next);
+                                          }}
+                                          className="rounded text-indigo-600 focus:ring-indigo-500"
+                                        />
+                                        <span>{opt}</span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              ) : (
+                                <label className="flex items-center gap-2 p-2 rounded-lg border border-slate-200 bg-white cursor-pointer text-xs mt-1">
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(dynamicValues[field.fieldName])}
+                                    onChange={e => handleDynamicChange(field.fieldName, e.target.checked)}
+                                    className="rounded text-indigo-600 focus:ring-indigo-500"
+                                  />
+                                  <span className="text-slate-700 font-medium">{field.placeholder || 'Yes, opt-in / confirmed'}</span>
+                                </label>
+                              )
+                            )}
+
+                            {field.fieldType === 'file' && (
+                              <div className="flex items-center gap-3 mt-1">
+                                {dynamicValues[field.fieldName] ? (
+                                  <div className="flex items-center gap-2 px-3 py-2 bg-indigo-50 border border-indigo-200 rounded-lg text-xs font-semibold text-indigo-900 flex-1">
+                                    <FileText className="w-4 h-4 text-indigo-600 shrink-0" />
+                                    <span className="truncate flex-1">
+                                      {dynamicValues[field.fieldName]?.fileName || 'Document Attached'}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDynamicFileUpload(field.fieldName, null)}
+                                      className="text-rose-600 hover:text-rose-800 text-[11px] underline ml-2 font-medium"
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 cursor-pointer transition shadow-2xs">
+                                    <Upload className="w-3.5 h-3.5 text-indigo-600" />
+                                    <span>Choose Document File</span>
+                                    <input
+                                      type="file"
+                                      className="hidden"
+                                      onChange={e => {
+                                        const file = e.target.files?.[0] || null;
+                                        handleDynamicFileUpload(field.fieldName, file);
+                                      }}
+                                    />
+                                  </label>
+                                )}
+                              </div>
+                            )}
+
+                            {field.fieldType === 'textarea' && (
+                              <textarea
+                                rows={2}
+                                value={dynamicValues[field.fieldName] || ''}
+                                onChange={e => handleDynamicChange(field.fieldName, e.target.value)}
+                                placeholder={field.placeholder || `Enter ${field.label}...`}
+                                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-white shadow-2xs"
+                              />
+                            )}
+
+                            {field.helpText && (
+                              <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                                {field.helpText}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Action Buttons */}
               <div className="pt-4 border-t border-slate-200 flex items-center justify-end gap-3">
