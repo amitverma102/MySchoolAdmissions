@@ -1,6 +1,6 @@
 export interface FormFieldCondition {
   dependsOn: string; // e.g. "grade", "hasSiblingInSchool", "requiresTransport"
-  operator: 'equals' | 'notEquals' | 'contains' | 'greaterThan' | 'lessThan' | 'isTruthy' | 'isFalsy';
+  operator: 'equals' | 'notEquals' | 'contains' | 'greaterThan' | 'lessThan' | 'greaterThanOrEqual' | 'lessThanOrEqual' | 'isTruthy' | 'isFalsy';
   value: string;
   action?: 'show' | 'hide';
 }
@@ -100,6 +100,19 @@ export function evaluateCondition(
       break;
     }
 
+    case 'greaterThanOrEqual': {
+      if (targetLower === 'grade' || targetLower === 'gradeapplyingfor' || targetLower === 'gradeinterested') {
+        const actualNum = parseGradeNumber(String(actualVal));
+        const expectedNum = parseGradeNumber(expected) || Number(expected);
+        isMet = actualNum >= expectedNum;
+      } else {
+        const actualNum = Number(actualVal);
+        const expectedNum = Number(expected);
+        isMet = !isNaN(actualNum) && !isNaN(expectedNum) && actualNum >= expectedNum;
+      }
+      break;
+    }
+
     case 'lessThan': {
       if (targetLower === 'grade' || targetLower === 'gradeapplyingfor' || targetLower === 'gradeinterested') {
         const actualNum = parseGradeNumber(String(actualVal));
@@ -109,6 +122,19 @@ export function evaluateCondition(
         const actualNum = Number(actualVal);
         const expectedNum = Number(expected);
         isMet = !isNaN(actualNum) && !isNaN(expectedNum) && actualNum < expectedNum;
+      }
+      break;
+    }
+
+    case 'lessThanOrEqual': {
+      if (targetLower === 'grade' || targetLower === 'gradeapplyingfor' || targetLower === 'gradeinterested') {
+        const actualNum = parseGradeNumber(String(actualVal));
+        const expectedNum = parseGradeNumber(expected) || Number(expected);
+        isMet = actualNum <= expectedNum;
+      } else {
+        const actualNum = Number(actualVal);
+        const expectedNum = Number(expected);
+        isMet = !isNaN(actualNum) && !isNaN(expectedNum) && actualNum <= expectedNum;
       }
       break;
     }
@@ -160,8 +186,14 @@ export function getConditionDescription(
     case 'greaterThan':
       opText = '>';
       break;
+    case 'greaterThanOrEqual':
+      opText = '>=';
+      break;
     case 'lessThan':
       opText = '<';
+      break;
+    case 'lessThanOrEqual':
+      opText = '<=';
       break;
     case 'isTruthy':
       return `Visible IF [${parentName}] is selected/checked`;

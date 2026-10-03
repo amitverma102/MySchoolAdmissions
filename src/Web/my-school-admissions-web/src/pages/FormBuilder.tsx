@@ -247,6 +247,17 @@ export default function FormBuilder() {
   const unconditionalFields = activeSchema?.fields.filter(f => !f.condition) || [];
   const conditionalFields = activeSchema?.fields.filter(f => Boolean(f.condition)) || [];
 
+  const gradeLanguageFields = activeSchema?.fields.filter(
+    f => f.condition?.dependsOn === 'grade' && (Number(f.condition.value) || 0) <= 6
+  ) || [];
+  const seniorSecondaryFields = activeSchema?.fields.filter(
+    f => (f.condition?.dependsOn === 'grade' && (Number(f.condition.value) || 0) > 6) ||
+         f.fieldName === 'academicStream' || f.fieldName === 'grade10Aggregate' || f.fieldName === 'integratedCoaching'
+  ) || [];
+  const coachingTrackFields = activeSchema?.fields.filter(
+    f => f.condition?.dependsOn === 'integratedCoaching'
+  ) || [];
+
   // Group conditional fields by trigger parent
   const branchGroups: Record<string, FormField[]> = {};
   conditionalFields.forEach(f => {
@@ -447,10 +458,10 @@ export default function FormBuilder() {
                     </div>
                     <div>
                       <span className="text-[10px] uppercase font-bold text-amber-700 tracking-wider">
-                        Decision Node 1 • Grade Rule
+                        Decision Node 1A • Language Curriculum Rule
                       </span>
                       <h4 className="text-xs font-bold text-slate-900">
-                        Is Student Applying For Grade &gt; 5 (Middle / Secondary School)?
+                        Is Student Applying For Grade &gt; 5 (Middle School &amp; Above)?
                       </h4>
                     </div>
                   </div>
@@ -470,7 +481,7 @@ export default function FormBuilder() {
                     </div>
 
                     {/* Find field depending on grade */}
-                    {activeSchema.fields.filter(f => f.condition?.dependsOn === 'grade').map(field => (
+                    {gradeLanguageFields.map(field => (
                       <div key={field.id} className="bg-white p-3 rounded-lg border border-emerald-300 shadow-2xs space-y-1.5">
                         <div className="flex items-start justify-between gap-2">
                           <div>
@@ -482,7 +493,7 @@ export default function FormBuilder() {
                           </span>
                         </div>
                         <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-[10px]">
-                          <span className="text-emerald-700 font-semibold">Rule: Grade &gt; 5</span>
+                          <span className="text-emerald-700 font-semibold">Rule: Grade &gt; 5 (Grade 6+)</span>
                           <button
                             type="button"
                             onClick={() => handleOpenConditionModal(field)}
@@ -493,9 +504,9 @@ export default function FormBuilder() {
                         </div>
                       </div>
                     ))}
-                    {activeSchema.fields.filter(f => f.condition?.dependsOn === 'grade').length === 0 && (
+                    {gradeLanguageFields.length === 0 && (
                       <div className="text-xs text-slate-400 italic p-3 text-center">
-                        No field configured for Grade &gt; 5 yet.
+                        No second language configured for Grade &gt; 5 in this template.
                       </div>
                     )}
                   </div>
@@ -512,6 +523,82 @@ export default function FormBuilder() {
                   </div>
                 </div>
               </div>
+
+              {/* BRANCH 1B: SENIOR SECONDARY RULE (Grade 11 & 12 -> Academic Stream Selection) */}
+              {(seniorSecondaryFields.length > 0 || selectedGrade === 'ALL' || selectedGrade === 'Grade 11') && (
+                <div className="bg-white border-2 border-indigo-300/80 rounded-2xl p-5 shadow-sm space-y-4 relative">
+                  <div className="flex items-center justify-between border-b border-indigo-100 pb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-800 flex items-center justify-center font-bold text-sm">
+                        ◆
+                      </div>
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-indigo-700 tracking-wider">
+                          Decision Node 1B • Senior Secondary Specialization
+                        </span>
+                        <h4 className="text-xs font-bold text-slate-900">
+                          Is Student Applying For Grade 11 &amp; 12 (Senior Secondary)?
+                        </h4>
+                      </div>
+                    </div>
+                    <span className="text-[10px] bg-indigo-50 border border-indigo-200 text-indigo-800 px-2 py-0.5 rounded-full font-bold">
+                      Grade 11 &amp; 12 Only
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+                    {/* TRUE BRANCH: Grade 11 & 12 */}
+                    <div className="border border-emerald-200 bg-emerald-50/40 rounded-xl p-4 space-y-3 relative">
+                      <div className="flex items-center justify-between">
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-600 text-white font-bold text-[10px] flex items-center gap-1 shadow-xs">
+                          <Check className="w-3 h-3" /> YES (Grade 11 &amp; 12)
+                        </span>
+                        <span className="text-[10px] text-emerald-700 font-semibold">Reveals Stream Selection &amp; Electives</span>
+                      </div>
+
+                      {seniorSecondaryFields.map(field => (
+                        <div key={field.id} className="bg-white p-3 rounded-lg border border-emerald-300 shadow-2xs space-y-1.5">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <span className="text-xs font-bold text-slate-900 block">{field.label}</span>
+                              <span className="text-[10px] text-slate-500">{field.helpText || field.section}</span>
+                            </div>
+                            <span className="text-[9px] bg-blue-50 text-blue-700 font-bold px-1.5 py-0.5 rounded border border-blue-200 uppercase">
+                              {field.fieldType}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-[10px]">
+                            <span className="text-emerald-700 font-semibold">Rule: Applicable to Grade 11 &amp; 12</span>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenConditionModal(field)}
+                              className="text-blue-600 hover:text-blue-800 font-bold underline"
+                            >
+                              Edit Condition
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      {seniorSecondaryFields.length === 0 && (
+                        <div className="text-xs text-slate-400 italic p-3 text-center">
+                          Academic Stream Selection configured for Senior Secondary.
+                        </div>
+                      )}
+                    </div>
+
+                    {/* FALSE BRANCH: Grade < 11 */}
+                    <div className="border border-slate-200 bg-slate-100/60 rounded-xl p-4 flex flex-col justify-center items-center text-center space-y-1">
+                      <span className="px-2 py-0.5 rounded-md bg-slate-300 text-slate-700 font-bold text-[10px]">
+                        NO (Pre-Nursery – Grade 10)
+                      </span>
+                      <span className="text-xs font-bold text-slate-700 mt-2">Bypass Academic Stream</span>
+                      <p className="text-[11px] text-slate-500 max-w-xs">
+                        Students follow standard comprehensive academic curriculum without specialized streams.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* BRANCH 2: SIBLING ENROLLED DECISION */}
               <div className="bg-white border-2 border-indigo-300/80 rounded-2xl p-5 shadow-sm space-y-4 relative">
@@ -650,6 +737,77 @@ export default function FormBuilder() {
                   </div>
                 </div>
               </div>
+
+              {/* BRANCH 4: INTEGRATED COACHING SPECIALIZATION DECISION */}
+              {coachingTrackFields.length > 0 && (
+                <div className="bg-white border-2 border-purple-300/80 rounded-2xl p-5 shadow-sm space-y-4 relative">
+                  <div className="flex items-center justify-between border-b border-purple-100 pb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-purple-100 text-purple-800 flex items-center justify-center font-bold text-sm">
+                        ◆
+                      </div>
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-purple-700 tracking-wider">
+                          Decision Node 4 • Competitive Exam Coaching Rule
+                        </span>
+                        <h4 className="text-xs font-bold text-slate-900">
+                          Opt for Integrated JEE / NEET / SAT In-Campus Coaching?
+                        </h4>
+                      </div>
+                    </div>
+                    <span className="text-[10px] bg-purple-50 border border-purple-200 text-purple-800 px-2 py-0.5 rounded-full font-bold">
+                      Trigger Field: integratedCoaching
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+                    {/* TRUE BRANCH: Coaching = Yes */}
+                    <div className="border border-emerald-200 bg-emerald-50/40 rounded-xl p-4 space-y-3 relative">
+                      <div className="flex items-center justify-between">
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-600 text-white font-bold text-[10px] flex items-center gap-1 shadow-xs">
+                          <Check className="w-3 h-3" /> YES (Enrolled in Integrated Batch)
+                        </span>
+                        <span className="text-[10px] text-emerald-700 font-semibold">Reveals Exam Specialization Track</span>
+                      </div>
+
+                      {coachingTrackFields.map(field => (
+                        <div key={field.id} className="bg-white p-3 rounded-lg border border-emerald-300 shadow-2xs space-y-1.5">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <span className="text-xs font-bold text-slate-900 block">{field.label}</span>
+                              <span className="text-[10px] text-slate-500">{field.helpText || field.section}</span>
+                            </div>
+                            <span className="text-[9px] bg-purple-50 text-purple-700 font-bold px-1.5 py-0.5 rounded border border-purple-200 uppercase">
+                              {field.fieldType}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-[10px]">
+                            <span className="text-emerald-700 font-semibold">Rule: integratedCoaching contains Yes</span>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenConditionModal(field)}
+                              className="text-blue-600 hover:text-blue-800 font-bold underline"
+                            >
+                              Edit Condition
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* FALSE BRANCH: Coaching = No */}
+                    <div className="border border-slate-200 bg-slate-100/60 rounded-xl p-4 flex flex-col justify-center items-center text-center space-y-1">
+                      <span className="px-2 py-0.5 rounded-md bg-slate-300 text-slate-700 font-bold text-[10px]">
+                        NO (Regular Board Classes Only)
+                      </span>
+                      <span className="text-xs font-bold text-slate-700 mt-2">Bypass Entrance Track Selection</span>
+                      <p className="text-[11px] text-slate-500 max-w-xs">
+                        Student focuses exclusively on core school board syllabus without evening coaching sessions.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Flow line to Completion */}
@@ -1145,7 +1303,9 @@ export default function FormBuilder() {
                           <option value="notEquals">Not Equals (!=)</option>
                           <option value="contains">Contains text</option>
                           <option value="greaterThan">Greater than (&gt;)</option>
+                          <option value="greaterThanOrEqual">Greater than or equal (&gt;=)</option>
                           <option value="lessThan">Less than (&lt;)</option>
+                          <option value="lessThanOrEqual">Less than or equal (&lt;=)</option>
                           <option value="isTruthy">Is Checked / Yes</option>
                         </select>
                       </div>
@@ -1381,9 +1541,11 @@ export default function FormBuilder() {
                           className="w-full px-2 py-1.5 border border-slate-300 rounded bg-white text-xs"
                         >
                           <option value="greaterThan">Greater Than (&gt;)</option>
+                          <option value="greaterThanOrEqual">Greater Than or Equal (&gt;=)</option>
                           <option value="equals">Equals (==)</option>
                           <option value="contains">Contains text</option>
                           <option value="lessThan">Less Than (&lt;)</option>
+                          <option value="lessThanOrEqual">Less Than or Equal (&lt;=)</option>
                           <option value="notEquals">Not Equals (!=)</option>
                           <option value="isTruthy">Is Checked / Yes</option>
                         </select>

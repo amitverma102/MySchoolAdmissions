@@ -205,7 +205,14 @@ public class FormSchemasController : ControllerBase
                         "Humanities / Liberal Arts with Psychology" 
                     },
                     IsRequired = true,
-                    Section = "Specialization & Electives"
+                    Section = "Specialization & Electives",
+                    Condition = new FormFieldCondition
+                    {
+                        DependsOn = "grade",
+                        Operator = "greaterThan",
+                        Value = "10",
+                        Action = "show"
+                    }
                 },
                 new()
                 {
@@ -216,7 +223,14 @@ public class FormSchemasController : ControllerBase
                     IsRequired = true,
                     Placeholder = "e.g. 88.5",
                     HelpText = "Minimum 75% aggregate required for PCM stream.",
-                    Section = "Academic & Student Details"
+                    Section = "Academic & Student Details",
+                    Condition = new FormFieldCondition
+                    {
+                        DependsOn = "grade",
+                        Operator = "greaterThan",
+                        Value = "10",
+                        Action = "show"
+                    }
                 },
                 new()
                 {
@@ -226,7 +240,14 @@ public class FormSchemasController : ControllerBase
                     FieldType = "radio",
                     Options = new List<string> { "Yes, enroll in integrated batch", "No, regular board classes only" },
                     IsRequired = true,
-                    Section = "Specialization & Electives"
+                    Section = "Specialization & Electives",
+                    Condition = new FormFieldCondition
+                    {
+                        DependsOn = "grade",
+                        Operator = "greaterThan",
+                        Value = "10",
+                        Action = "show"
+                    }
                 },
                 new()
                 {
@@ -267,12 +288,7 @@ public class FormSchemasController : ControllerBase
     {
         var general = _schemas.FirstOrDefault(s => s.GradeApplicable.Equals("ALL", StringComparison.OrdinalIgnoreCase));
         
-        var specific = _schemas.FirstOrDefault(s =>
-            !s.GradeApplicable.Equals("ALL", StringComparison.OrdinalIgnoreCase) && (
-                s.GradeApplicable.Equals(grade, StringComparison.OrdinalIgnoreCase) ||
-                grade.StartsWith(s.GradeApplicable, StringComparison.OrdinalIgnoreCase) ||
-                s.GradeApplicable.StartsWith(grade, StringComparison.OrdinalIgnoreCase)
-            ));
+        var specific = _schemas.FirstOrDefault(s => IsGradeMatching(s, grade));
 
         if (specific == null)
         {
@@ -329,6 +345,61 @@ public class FormSchemasController : ControllerBase
         };
 
         return Ok(combinedSchema);
+    }
+
+    private static bool IsGradeMatching(FormSchemaDto schema, string targetGrade)
+    {
+        if (schema == null || string.IsNullOrWhiteSpace(targetGrade))
+            return false;
+
+        var schemaGrade = schema.GradeApplicable;
+        if (string.IsNullOrWhiteSpace(schemaGrade) || schemaGrade.Equals("ALL", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        // Exact match
+        if (schemaGrade.Equals(targetGrade, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var targetNum = ExtractGradeNumber(targetGrade);
+        var schemaNum = ExtractGradeNumber(schemaGrade);
+
+        // Senior Secondary: Grade 11 & Grade 12 match Grade 11 / Senior Secondary schema
+        bool isSeniorSecondarySchema = schemaNum == 11 || 
+            schema.Id.Contains("senior", StringComparison.OrdinalIgnoreCase) ||
+            schema.FormTitle.Contains("Senior Secondary", StringComparison.OrdinalIgnoreCase) ||
+            schema.FormTitle.Contains("11 & 12", StringComparison.OrdinalIgnoreCase) ||
+            schemaGrade.Contains("11 & 12", StringComparison.OrdinalIgnoreCase);
+
+        if (isSeniorSecondarySchema)
+        {
+            return targetNum == 11 || targetNum == 12;
+        }
+
+        if (targetNum > 0 && schemaNum > 0)
+        {
+            return targetNum == schemaNum;
+        }
+
+        // Prefix match with non-digit boundary (e.g. target "Grade 11 (Science)" matches schema "Grade 11")
+        if (targetGrade.StartsWith(schemaGrade, StringComparison.OrdinalIgnoreCase))
+        {
+            if (targetGrade.Length == schemaGrade.Length || !char.IsLetterOrDigit(targetGrade[schemaGrade.Length]))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static int ExtractGradeNumber(string gradeStr)
+    {
+        if (string.IsNullOrWhiteSpace(gradeStr)) return -1;
+        var match = System.Text.RegularExpressions.Regex.Match(gradeStr, @"\b(?:Grade\s*)?(\d+)\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (match.Success && int.TryParse(match.Groups[1].Value, out var num))
+            return num;
+        var digitsMatch = System.Text.RegularExpressions.Regex.Match(gradeStr, @"\d+");
+        if (digitsMatch.Success && int.TryParse(digitsMatch.Value, out var digitsNum))
+            return digitsNum;
+        return -1;
     }
 
     [HttpPost]
